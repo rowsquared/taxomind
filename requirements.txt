@@ -1,0 +1,14 @@
+kedro>=0.19.5
+kedro-datasets[pandas-csvdataset,pandas-parquetdataset,pandas-exceldataset,plotly-plotlydataset,plotly-JSONDataset,matplotlib-matplotlibwriter]>=3.0
+sentence-transformers
+txtai
+fastapi
+uvicorn[standard]
+setfit
+scikit-learn
+pandas
+numpy
+transformers
+pyyaml
+requests
+ollama

@@ -1,0 +1,88 @@
+# Kedro Data Catalog (multilingual-aware). All datasets may contain UTF-8 text in
+# any language, so downstream nodes should avoid locale assumptions.
+
+taxonomy_request:
+  type: json.JSONDataset
+  filepath: data/01_raw/taxonomy_request.json
+  save_args:
+    indent: 2
+    ensure_ascii: false
+
+taxonomy_table:
+  type: MemoryDataset
+
+taxonomy_metadata:
+  type: MemoryDataset
+
+taxonomy_validated:
+  type: MemoryDataset
+
+taxonomy_enriched:
+  type: MemoryDataset
+
+taxonomy_embedded_raw:
+  type: MemoryDataset
+
+taxonomy_embedded:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/taxonomies
+  dataset: pandas.ParquetDataset
+  filename_suffix: .parquet
+
+
+taxonomy_full_paths:
+  type: MemoryDataset
+
+taxonomy_full_path_embeddings:
+  type: MemoryDataset
+
+isco_test_sentences:
+  type: json.JSONDataset
+  filepath: data/01_raw/isco_test_sentences.json
+
+zero_shot_inputs:
+  type: MemoryDataset
+
+zero_shot_sentence_embeddings:
+  type: MemoryDataset
+
+zero_shot_topdown:
+  type: MemoryDataset
+
+zero_shot_bottomup:
+  type: MemoryDataset
+
+zero_shot_flat:
+  type: MemoryDataset
+
+zero_shot_comparison:
+  type: MemoryDataset
+
+zero_shot_judgement:
+  type: json.JSONDataset
+  filepath: data/07_model_output/zero_shot_judgement.json
+  save_args:
+    indent: 2
+
+labeled_training_samples:
+  type: pandas.CSVDataset
+  filepath: data/02_intermediate/labeled_samples_multilingual.csv
+  load_args:
+    encoding: utf-8
+
+supervised_training_batches:
+  type: MemoryDataset
+
+supervised_model_registry:
+  type: pickle.PickleDataset
+  filepath: data/06_models/supervised_registry.pkl
+
+multilingual_evaluation_samples:
+  type: pandas.CSVDataset
+  filepath: data/03_primary/multilingual_evaluation_samples.csv
+  load_args:
+    encoding: utf-8
+
+supervised_metrics:
+  type: json.JSONDataset
+  filepath: data/08_reporting/supervised_metrics.json

@@ -1,0 +1,52 @@
+# Supervised Hierarchical Classification Training Parameters (SetFit Framework)
+
+supervised:
+  # Model configuration (configurable via parameters)
+  model_name: "answerdotai/ModernBERT-base"  # ModernBERT as base for SetFit
+
+  # Data preparation
+  min_samples_per_level: 10  # Minimum samples required to train a level
+
+  # Enrichment configuration
+  unknown_label_name: "Unknown"  # Label name for unknown (-99) codes
+  unknown_definition: "This category reflects the inability to assign a proper label"
+
+  # SetFit Training Parameters (consistent naming with similar semantics)
+  training:
+    # Core parameters
+    batch_size: 16  # Batch size for both contrastive and classification phases
+    num_iterations: 20  # SetFit training iterations (replaces epochs)
+    num_epochs: 1  # Epochs per iteration (SetFit default)
+    learning_rate: 2.0e-5  # Learning rate for classification head
+    body_learning_rate: null  # Learning rate for sentence transformer (null = use learning_rate)
+
+    # Data parameters
+    max_length: 512  # Maximum sequence length for tokenization
+    test_size: 0.2  # Validation split ratio
+
+    # Few-shot configuration (optional)
+    samples_per_class: null  # null = use all data, or specify (e.g., 16 for few-shot)
+
+  # Optional: Class-specific minimum samples
+  # If a class has fewer samples than this, it will be filtered out
+  min_samples_per_class: 3
+
+  # Device configuration (auto-detected by default)
+  # device: "cuda"  # Uncomment to force GPU
+  # device: "cpu"   # Uncomment to force CPU
+
+  # Model saving
+  save_training_history: true
+
+  # Inference settings
+  inference:
+    batch_size: 32
+    top_k_predictions: 5  # Number of top predictions to return
+    confidence_threshold: 0.5  # Minimum confidence for predictions
+
+# SetFit Framework Notes:
+# - Uses contrastive learning (sentence-transformer fine-tuning) + classification head
+# - num_iterations: Number of training iterations (default: 20)
+# - num_epochs: Epochs per iteration (default: 1)
+# - Works well with both few-shot (8-64 samples/class) and full data
+# - ModernBERT is used as the base for the sentence transformer

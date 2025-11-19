@@ -1,0 +1,143 @@
+# Data Catalog entries for Supervised Hierarchical Classification Pipeline
+# Add these entries to your main catalog.yml or include this file
+
+# ===================================================================
+# INPUT: Labeled Dataset
+# ===================================================================
+
+# Option 1: Legacy CSV format
+labeled_dataset:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/labeled_dataset.csv
+  load_args:
+    encoding: utf-8
+  # Expected columns: text, leaf_code
+  # Example:
+  # text,leaf_code
+  # "Software engineer developing applications","2512.1"
+  # "Medical doctor in hospital","2212.3"
+
+# Option 2: New JSON format with sentence-level annotations
+labeled_dataset_json:
+  type: json.JSONDataset
+  filepath: data/01_raw/labeled_dataset.json
+  # Expected structure: List of sentence objects
+  # [
+  #   {
+  #     "sentenceId": "abc123",
+  #     "fields": {"job_description": "Software engineer..."},
+  #     "annotations": [
+  #       {"level": 1, "nodeCode": "2"},
+  #       {"level": 2, "nodeCode": "25"},
+  #       {"level": 3, "nodeCode": "251"},
+  #       {"level": 4, "nodeCode": "2512"},
+  #       {"level": 5, "nodeCode": ""}
+  #     ]
+  #   }
+  # ]
+  # Empty nodeCode values will be replaced with "-99"
+
+# ===================================================================
+# INTERMEDIATE: Training Data per Level
+# ===================================================================
+
+training_level_1:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_1.parquet
+
+training_level_2:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_2.parquet
+
+training_level_3:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_3.parquet
+
+training_level_4:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_4.parquet
+
+training_level_5:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_5.parquet
+
+# ===================================================================
+# ENRICHED: Training Data with Label Names and Definitions
+# ===================================================================
+
+training_level_1_enriched:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_1_enriched.parquet
+
+training_level_2_enriched:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_2_enriched.parquet
+
+training_level_3_enriched:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_3_enriched.parquet
+
+training_level_4_enriched:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_4_enriched.parquet
+
+training_level_5_enriched:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/training_level_5_enriched.parquet
+
+# ===================================================================
+# OUTPUT: Trained Models per Level
+# ===================================================================
+
+model_level_1:
+  type: pickle.PickleDataset
+  filepath: data/06_models/model_level_1.pkl
+  backend: pickle
+
+model_level_2:
+  type: pickle.PickleDataset
+  filepath: data/06_models/model_level_2.pkl
+  backend: pickle
+
+model_level_3:
+  type: pickle.PickleDataset
+  filepath: data/06_models/model_level_3.pkl
+  backend: pickle
+
+model_level_4:
+  type: pickle.PickleDataset
+  filepath: data/06_models/model_level_4.pkl
+  backend: pickle
+
+model_level_5:
+  type: pickle.PickleDataset
+  filepath: data/06_models/model_level_5.pkl
+  backend: pickle
+
+# ===================================================================
+# OUTPUT: Training Metrics and Logs
+# ===================================================================
+
+training_metrics:
+  type: json.JSONDataset
+  filepath: data/08_reporting/training_metrics.json
+  save_args:
+    indent: 2
+
+# ===================================================================
+# OPTIONAL: Pre-split Train/Test Sets
+# ===================================================================
+
+# If you want to manually control train/test splits, use these instead:
+
+# labeled_dataset_train:
+#   type: pandas.CSVDataset
+#   filepath: data/01_raw/labeled_dataset_train.csv
+#   load_args:
+#     encoding: utf-8
+
+# labeled_dataset_test:
+#   type: pandas.CSVDataset
+#   filepath: data/01_raw/labeled_dataset_test.csv
+#   load_args:
+#     encoding: utf-8

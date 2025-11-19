@@ -1,0 +1,17 @@
+embedding:
+  model_name: "BAAI/bge-m3"
+
+zero_shot:
+  sample_text: "Job_description: vegetable farmer"
+  model_name: "BAAI/bge-m3"
+  topdown_k: 1
+  bottomup_k: 1
+  flat_k: 5
+  debug_level: "high"  # Options: "low", "medium", "high"
+
+supervised:
+  languages: ["multi"]
+  base_model_name: "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+
+judge:
+  model_name: "llama3.1:8b"
