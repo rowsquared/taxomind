@@ -1,85 +1,104 @@
-"""FastAPI router for dynamic taxonomy ingestion and embedding."""
+"""FastAPI router for taxonomy management with async job tracking."""
 
 from __future__ import annotations
 
-from typing import Dict, List, Literal
+from datetime import UTC, datetime
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from .taxonomy_service import (
-    TaxonomyPipelineService,
-    get_taxonomy_pipeline_service,
+from taxomind.services.api.models import (
+    TaxonomyJobResponse,
+    TaxonomyRequest,
+    TaxonomyStatusResponse,
 )
+from taxomind.services.api.taxonomy_service import (
+    TaxonomyPipelineService,
+    get_taxonomy_service,
+)
+from taxomind.storage.job_store import JobStore, get_job_store
 
-router = APIRouter(prefix="/taxonomy", tags=["taxonomy"])
+router = APIRouter(prefix="", tags=["taxonomies"])
 
 
-class TaxonomyNode(BaseModel):
-    code: str = Field(..., description="Unique code for the taxonomy node.")
-    level: int = Field(..., ge=1, description="1-indexed depth of the node.")
-    label: str = Field(..., description="Human-readable label for the node.")
-    definition: str | None = Field(
-        default=None, description="Optional definition describing the node."
+@router.post(
+    "/taxonomies", status_code=202, response_model=TaxonomyJobResponse
+)
+async def create_taxonomy(
+    request: TaxonomyRequest,
+    background_tasks: BackgroundTasks,
+    service: TaxonomyPipelineService = Depends(get_taxonomy_service),
+    job_store: JobStore = Depends(get_job_store),
+) -> TaxonomyJobResponse:
+    """
+    Create a new taxonomy by triggering the taxonomy pipeline asynchronously.
+
+    This endpoint accepts taxonomy data and immediately returns a job ID.
+    The actual processing happens in the background and can take several
+    minutes.
+
+    Use the GET /taxonomies/{job_id}/status endpoint to check job status.
+
+    Args:
+        request: Taxonomy data including action and taxonomy structure
+        background_tasks: FastAPI background tasks manager
+        service: Taxonomy pipeline service
+        job_store: Job status storage
+
+    Returns:
+        TaxonomyJobResponse with job_id and initial status
+    """
+    # Generate unique job ID
+    job_id = str(uuid4())
+
+    # Create job entry
+    job_store.create_job(
+        job_id=job_id,
+        status="pending",
+        message="Taxonomy processing queued",
+        created_at=datetime.now(UTC),
     )
-    examples: str | List[str] | None = Field(
-        default=None, description="Usage examples or sample descriptions."
-    )
-    parentCode: str | None = Field(
-        default=None, description="Parent code or null for root nodes."
-    )
-    isLeaf: bool = Field(
-        default=False, description="Whether the node represents a terminal leaf."
+
+    # Add pipeline execution to background tasks
+    background_tasks.add_task(
+        service.run_pipeline,
+        job_id=job_id,
+        taxonomy_data=request.taxonomy.model_dump(),
     )
 
-
-class TaxonomyPayload(BaseModel):
-    key: str = Field(..., description="Canonical key for the taxonomy, e.g., ISCO.")
-    maxDepth: int | None = Field(
-        default=None,
-        description="Maximum depth of the taxonomy hierarchy.",
+    return TaxonomyJobResponse(
+        job_id=job_id,
+        status="pending",
+        message="Taxonomy processing started",
+        created_at=datetime.now(UTC),
     )
-    levelNames: Dict[str, str] = Field(
-        default_factory=dict,
-        description="Mapping describing friendly labels for each level.",
-    )
-    nodes: List[TaxonomyNode]
 
 
-class TaxonomyUpdateRequest(BaseModel):
-    action: Literal["create", "update", "delete"]
-    taxonomy: TaxonomyPayload
+@router.get(
+    "/taxonomies/{job_id}/status", response_model=TaxonomyStatusResponse
+)
+async def get_taxonomy_status(
+    job_id: str,
+    job_store: JobStore = Depends(get_job_store),
+) -> TaxonomyStatusResponse:
+    """
+    Get the current status of a taxonomy processing job.
 
+    Poll this endpoint to check if the taxonomy pipeline has completed.
 
-class TaxonomyUpdateResponse(BaseModel):
-    status: Literal["success"]
-    taxonomyKey: str
-    artifact: str
-    num_nodes: int = Field(..., ge=0)
+    Args:
+        job_id: The job ID returned from the POST /taxonomies endpoint
+        job_store: Job status storage
 
+    Returns:
+        TaxonomyStatusResponse with current job status and progress
 
-@router.post("/update", response_model=TaxonomyUpdateResponse)
-def update_taxonomy(
-    payload: TaxonomyUpdateRequest,
-    service: TaxonomyPipelineService = Depends(get_taxonomy_pipeline_service),
-) -> TaxonomyUpdateResponse:
-    """Create, update, or delete taxonomy embeddings on demand."""
+    Raises:
+        HTTPException: 404 if job_id is not found
+    """
+    job = job_store.get_job(job_id)
 
-    taxonomy_key = payload.taxonomy.key
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    if payload.action == "delete":
-        metadata = service.delete_taxonomy(taxonomy_key)
-        return TaxonomyUpdateResponse(
-            status="success",
-            taxonomyKey=metadata["taxonomyKey"],
-            artifact=metadata["artifact"],
-            num_nodes=0,
-        )
-
-    metadata = service.run(payload.model_dump(mode="json"))
-    return TaxonomyUpdateResponse(
-        status="success",
-        taxonomyKey=metadata["taxonomyKey"],
-        artifact=metadata["artifact"],
-        num_nodes=int(metadata.get("num_nodes", 0)),
-    )
+    return TaxonomyStatusResponse(**job)

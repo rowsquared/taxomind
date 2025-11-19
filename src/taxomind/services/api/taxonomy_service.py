@@ -1,8 +1,9 @@
-"""Service helpers for running taxonomy embedding flows via FastAPI."""
+"""Service layer for running taxonomy pipeline asynchronously."""
 
 from __future__ import annotations
 
-from functools import lru_cache
+import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -11,108 +12,135 @@ from kedro.framework.session import KedroSession
 from kedro.framework.startup import bootstrap_project
 from kedro.runner import SequentialRunner
 
+from taxomind.storage.job_store import get_job_store
+
+logger = logging.getLogger(__name__)
+
 
 class TaxonomyPipelineService:
-    """Thin wrapper responsible for invoking the embedding pipeline."""
+    """Service for executing taxonomy pipeline with job tracking."""
 
     _bootstrapped = False
 
     def __init__(self, pipeline_name: str = "taxonomy_pipe") -> None:
         self.pipeline_name = pipeline_name
         self.project_path = Path(__file__).resolve().parents[4]
-        self.artifact_dir = (
-            self.project_path / "data" / "03_primary" / "taxonomies"
-        )
+        self.job_store = get_job_store()
+
+        # Bootstrap Kedro project once
         if not TaxonomyPipelineService._bootstrapped:
             bootstrap_project(self.project_path)
             TaxonomyPipelineService._bootstrapped = True
 
-    def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the taxonomy embedding pipeline for the provided payload."""
-
-        if not payload:
-            raise ValueError("payload is required to trigger the pipeline")
-
-        taxonomy = payload.get("taxonomy") or {}
-        taxonomy_key = (taxonomy.get("key") or "").strip()
-        if not taxonomy_key:
-            raise ValueError("taxonomy.key is required")
-
-        artifact_path = self.artifact_dir / f"{taxonomy_key}.parquet"
-        artifact_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with KedroSession.create(project_path=self.project_path) as session:
-            context = session.load_context()
-            pipeline = context.pipelines[self.pipeline_name]
-            catalog = context.catalog
-
-            catalog.save("taxonomy_request", payload)
-
-            hook_manager = session._hook_manager
-            run_params = self._build_run_params(session, context)
-            hook_manager.hook.before_pipeline_run(
-                run_params=run_params, pipeline=pipeline, catalog=catalog
+    def run_pipeline(self, job_id: str, taxonomy_data: Dict[str, Any]) -> None:
+        """
+        Execute the taxonomy pipeline in background.
+        Updates job status throughout execution.
+        """
+        try:
+            # Update status to running
+            self.job_store.update_job(
+                job_id,
+                status="running",
+                progress=0.1,
+                message="Starting taxonomy pipeline",
             )
 
-            runner = SequentialRunner()
-            try:
-                run_result = runner.run(
-                    pipeline=pipeline,
-                    catalog=catalog,
-                    hook_manager=hook_manager,
-                    run_id=session.store["session_id"],
+            # Prepare input payload
+            payload = {"action": "create", "taxonomy": taxonomy_data}
+
+            logger.info(
+                f"Job {job_id}: Running taxonomy pipeline "
+                f"for key '{taxonomy_data.get('key')}'"
+            )
+
+            # Run Kedro pipeline
+            with KedroSession.create(
+                project_path=self.project_path
+            ) as session:
+                context = session.load_context()
+
+                # Get pipeline from registry (Kedro 1.0)
+                from taxomind.pipeline_registry import register_pipelines
+                pipelines = register_pipelines()
+                pipeline = pipelines[self.pipeline_name]
+                catalog = context.catalog
+
+                # Save input data to catalog
+                self.job_store.update_job(
+                    job_id,
+                    progress=0.2,
+                    message="Loading taxonomy data",
                 )
-            except Exception as error:  # pragma: no cover - surfaced via API
-                hook_manager.hook.on_pipeline_error(
-                    error=error,
+                catalog.save("taxonomy_request", payload)
+
+                # Prepare hooks and run params
+                hook_manager = session._hook_manager
+                run_params = self._build_run_params(session, context)
+
+                hook_manager.hook.before_pipeline_run(
+                    run_params=run_params, pipeline=pipeline, catalog=catalog
+                )
+
+                # Execute pipeline
+                self.job_store.update_job(
+                    job_id,
+                    progress=0.3,
+                    message="Processing taxonomy nodes",
+                )
+
+                runner = SequentialRunner()
+                try:
+                    run_result = runner.run(
+                        pipeline=pipeline,
+                        catalog=catalog,
+                        hook_manager=hook_manager,
+                        run_id=session.store["session_id"],
+                    )
+                except Exception as error:
+                    hook_manager.hook.on_pipeline_error(
+                        error=error,
+                        run_params=run_params,
+                        pipeline=pipeline,
+                        catalog=catalog,
+                    )
+                    raise
+
+                hook_manager.hook.after_pipeline_run(
                     run_params=run_params,
+                    run_result=run_result,
                     pipeline=pipeline,
                     catalog=catalog,
                 )
-                raise
 
-            hook_manager.hook.after_pipeline_run(
-                run_params=run_params,
-                run_result=run_result,
-                pipeline=pipeline,
-                catalog=catalog,
-            )
-
-            metadata = catalog.load("taxonomy_metadata") or {}
-            metadata.setdefault("taxonomyKey", taxonomy_key)
-            metadata.setdefault("artifact", f"taxonomy_embedded/{taxonomy_key}.parquet")
-            metadata.setdefault("artifact_path", artifact_path.as_posix())
-            metadata.setdefault("dataset_name", f"taxonomy_embedded_{taxonomy_key}")
-            if "num_nodes" not in metadata:
-                taxonomy_table = catalog.load("taxonomy_table")
-                metadata["num_nodes"] = int(
-                    getattr(taxonomy_table, "shape", (0,))[0]
+                # Pipeline completed successfully
+                logger.info(f"Job {job_id}: Pipeline completed successfully")
+                self.job_store.update_job(
+                    job_id,
+                    status="completed",
+                    progress=1.0,
+                    message="Taxonomy synced successfully",
+                    completed_at=datetime.now(UTC),
                 )
 
-            return metadata
-
-    def delete_taxonomy(self, taxonomy_key: str) -> Dict[str, Any]:
-        """Delete stored taxonomy artifacts and return metadata."""
-
-        taxonomy_key = (taxonomy_key or "").strip()
-        if not taxonomy_key:
-            raise ValueError("taxonomy key is required for deletion")
-
-        artifact_path = self.artifact_dir / f"{taxonomy_key}.parquet"
-        if artifact_path.exists():
-            artifact_path.unlink()
-
-        return {
-            "taxonomyKey": taxonomy_key,
-            "artifact": f"taxonomy_embedded/{taxonomy_key}.parquet",
-            "artifact_path": artifact_path.as_posix(),
-            "dataset_name": f"taxonomy_embedded_{taxonomy_key}",
-            "num_nodes": 0,
-        }
+        except Exception as e:
+            # Pipeline failed
+            error_msg = str(e)
+            logger.error(
+                f"Job {job_id}: Pipeline failed with error: {error_msg}"
+            )
+            self.job_store.update_job(
+                job_id,
+                status="failed",
+                error=error_msg,
+                message="Pipeline execution failed",
+                completed_at=datetime.now(UTC),
+            )
 
     def _build_run_params(
         self, session: KedroSession, context: Any
-    ) -> Dict[str, Any]:  # pragma: no cover - mirrors Kedro internals
+    ) -> Dict[str, Any]:
+        """Build run parameters for Kedro hooks."""
         session_id = session.store["session_id"]
         runtime_params = session.store.get("runtime_params") or {}
         return {
@@ -135,8 +163,13 @@ class TaxonomyPipelineService:
         }
 
 
-@lru_cache(maxsize=1)
-def get_taxonomy_pipeline_service() -> TaxonomyPipelineService:
-    """FastAPI dependency factory for the taxonomy pipeline runner."""
+# Singleton instance
+_service_instance: TaxonomyPipelineService | None = None
 
-    return TaxonomyPipelineService()
+
+def get_taxonomy_service() -> TaxonomyPipelineService:
+    """Get or create singleton TaxonomyPipelineService instance."""
+    global _service_instance
+    if _service_instance is None:
+        _service_instance = TaxonomyPipelineService()
+    return _service_instance
