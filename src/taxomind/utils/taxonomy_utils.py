@@ -27,7 +27,7 @@ def get_level_nodes(
 ) -> pd.DataFrame:
     """Return nodes for a given level filtered by parent code."""
 
-    mask = taxonomy["level"] == level & taxonomy["parentCode"] == parent_code
+    mask = (taxonomy["level"] == level) & (taxonomy["parentCode"] == parent_code)
 
     return taxonomy.loc[mask].copy()
 
@@ -173,7 +173,7 @@ def infer_max_depth(max_depth: Any, nodes_raw: List[dict]) -> int:
 
 
 def normalize_node(node: dict, taxonomy_key: str, max_depth: int) -> Dict[str, Any]:
-    
+
     code = normalize_code(node.get("code"))
     if not code:
         raise ValueError("each node must include a code")
@@ -210,3 +210,28 @@ def normalize_node(node: dict, taxonomy_key: str, max_depth: int) -> Dict[str, A
         "isLeaf": is_leaf,
         "taxonomyKey": taxonomy_key,
     }
+
+
+def get_parent_chain(taxonomy: pd.DataFrame, code: str) -> List[str]:
+    """Trace parent relationships to return all ancestor codes from root to node."""
+    parent_codes: List[str] = []
+    visited: set[str] = set()
+    current_code = code
+
+    while current_code and current_code not in visited:
+        visited.add(current_code)
+        node_row = taxonomy[taxonomy["code"] == current_code]
+
+        if node_row.empty:
+            break
+
+        parent = node_row.iloc[0].get("parentCode")
+
+        # Stop at root (parentCode == "__root__")
+        if parent == "__root__" or parent is None or pd.isna(parent):
+            break
+
+        parent_codes.insert(0, parent)
+        current_code = parent
+
+    return parent_codes

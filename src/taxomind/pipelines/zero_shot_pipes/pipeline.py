@@ -11,26 +11,12 @@ def create_pipeline(**kwargs) -> Pipeline:
     return pipeline(
         [
             node(
-                func=nodes.load_test_sentences,
+                func=nodes.load_sentences,
                 inputs="isco_test_sentences",
-                outputs="zero_shot_inputs",
-                name="load_test_sentences",
+                outputs=["zero_shot_inputs", "taxonomyKey"],
+                name="load_sentences",
             ),
-            node(
-                func=nodes.build_full_paths,
-                inputs="taxonomy_embedded",
-                outputs="taxonomy_full_paths",
-                name="build_full_paths",
-            ),
-            node(
-                func=nodes.embed_full_paths,
-                inputs={
-                    "paths": "taxonomy_full_paths",
-                    "model_name": "params:zero_shot.model_name",
-                },
-                outputs="taxonomy_full_path_embeddings",
-                name="embed_full_paths",
-            ),
+
             node(
                 func=nodes.compute_sentence_embeddings,
                 inputs={
@@ -45,6 +31,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                 inputs={
                     "sentence_embeddings": "zero_shot_sentence_embeddings",
                     "taxonomy_embedded": "taxonomy_embedded",
+                    "taxonomy_key": "taxonomyKey",
                     "top_k": "params:zero_shot.topdown_k",
                 },
                 outputs="zero_shot_topdown",
@@ -55,6 +42,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                 inputs={
                     "sentence_embeddings": "zero_shot_sentence_embeddings",
                     "taxonomy_embedded": "taxonomy_embedded",
+                    "taxonomy_key": "taxonomyKey",
                     "top_k": "params:zero_shot.bottomup_k",
                 },
                 outputs="zero_shot_bottomup",
@@ -64,11 +52,24 @@ def create_pipeline(**kwargs) -> Pipeline:
                 func=nodes.compute_flat_routes,
                 inputs={
                     "sentence_embeddings": "zero_shot_sentence_embeddings",
-                    "taxonomy_full_paths": "taxonomy_full_path_embeddings",
+                    "taxonomy_full_paths": "taxonomy_full_path_embedded",
+                    "taxonomy_key": "taxonomyKey",
                     "top_k": "params:zero_shot.flat_k",
                 },
                 outputs="zero_shot_flat",
                 name="compute_flat_routes",
+            ),
+            node(
+                func=nodes.compute_hybrid_routes,
+                inputs={
+                    "sentence_embeddings": "zero_shot_sentence_embeddings",
+                    "taxonomy_embedded": "taxonomy_embedded",
+                    "taxonomy_full_paths": "taxonomy_full_path_embedded",
+                    "taxonomy_key": "taxonomyKey",
+                    "top_k": "params:zero_shot.hybrid_k",
+                },
+                outputs="zero_shot_hybrid",
+                name="compute_hybrid_routes",
             ),
             node(
                 func=nodes.compare_routes,
@@ -76,6 +77,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "zero_shot_topdown",
                     "zero_shot_bottomup",
                     "zero_shot_flat",
+                    "zero_shot_hybrid",
                 ],
                 outputs="zero_shot_comparison",
                 name="compare_routes",
@@ -85,9 +87,12 @@ def create_pipeline(**kwargs) -> Pipeline:
                 inputs={
                     "compared_results": "zero_shot_comparison",
                     "taxonomy_embedded": "taxonomy_embedded",
+                    "taxonomy_key": "taxonomyKey",
                     "judge_model_name": "params:judge.model_name",
                     "encoder_model_name": "params:zero_shot.model_name",
                     "debug_level": "params:zero_shot.debug_level",
+                    "min_confidence": "params:zero_shot.min_confidence",
+                    "judge_enabled": "params:judge.enabled",
                 },
                 outputs="zero_shot_judgement",
                 name="finalize_predictions",

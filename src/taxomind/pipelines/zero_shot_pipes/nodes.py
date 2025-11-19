@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -26,7 +26,7 @@ def compose_inference_text(fields: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def load_test_sentences(test_dataset: Dict[str, Any]) -> List[Dict[str, Any]]:
+def load_sentences(test_dataset: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
     """Transform raw JSON structure into inference-ready entries."""
 
     taxonomy_key = test_dataset.get("taxonomyKey")
@@ -42,28 +42,7 @@ def load_test_sentences(test_dataset: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "text": text,
             }
         )
-    return entries
-
-
-def build_full_paths(taxonomy_embedded: pd.DataFrame) -> pd.DataFrame:
-    """Enumerate every root-to-leaf path in the taxonomy."""
-
-    return taxonomy_utils.build_full_paths(taxonomy_embedded)
-
-
-def embed_full_paths(paths: pd.DataFrame, model_name: str) -> pd.DataFrame:
-    """Embed the textual representation of all taxonomy paths."""
-
-    paths = paths.copy()
-    if paths.empty:
-        paths["embedding"] = [[] for _ in range(len(paths))]
-        return paths
-    embeddings = embedding_utils.embed_texts(
-        paths["path_text"].fillna("").tolist(), model_name=model_name
-    )
-    paths["embedding"] = embeddings
-    paths["embedding_model_name"] = model_name
-    return paths
+    return entries, taxonomy_key
 
 
 def compute_sentence_embeddings(
@@ -138,12 +117,61 @@ def bottom_up_route(
     input_embedding: List[float],
     taxonomy_embedded: pd.DataFrame,
     top_k: int = 5,
+    parent_weight: float = 0.3,
 ) -> Dict[str, Any]:
-    """Rank leaves directly and reconstruct the best route bottom-up."""
+    """Rank leaves directly with parent-aware scoring and sibling re-ranking.
+
+    Args:
+        input_embedding: Input text embedding vector
+        taxonomy_embedded: Full taxonomy with embeddings
+        top_k: Number of top candidates to return
+        parent_weight: Weight for parent context (0.0-1.0), leaf weight is (1.0 - parent_weight)
+    """
 
     leaves = taxonomy_embedded[taxonomy_embedded["isLeaf"].astype(bool)]
-    leaf_scores = scoring_utils.score_candidates(input_embedding, leaves)
-    topk_candidates = leaf_scores[:top_k]
+
+    # Parent-aware scoring (Improvement 1)
+    enriched_scores = []
+    for _, leaf in leaves.iterrows():
+        # Score the leaf node itself
+        leaf_dict = taxonomy_utils.row_to_candidate(leaf)
+        leaf_embedding = leaf.get("embedding")
+
+        if leaf_embedding is None or not isinstance(leaf_embedding, (list, np.ndarray)):
+            continue
+
+        leaf_score = float(np.dot(input_embedding, leaf_embedding) /
+                          (np.linalg.norm(input_embedding) * np.linalg.norm(leaf_embedding)))
+
+        # Get parent chain and score parents
+        parent_codes = taxonomy_utils.get_parent_chain(taxonomy_embedded, leaf.get("code"))
+
+        if parent_codes:
+            parent_nodes = taxonomy_embedded[taxonomy_embedded["code"].isin(parent_codes)]
+            parent_scores_list = scoring_utils.score_candidates(input_embedding, parent_nodes)
+
+            if parent_scores_list:
+                avg_parent_score = float(np.mean([p.get("score", 0.0) for p in parent_scores_list]))
+            else:
+                avg_parent_score = 0.0
+        else:
+            avg_parent_score = 0.0
+
+        # Blend scores: default 70% leaf, 30% parent context
+        blended_score = (1.0 - parent_weight) * leaf_score + parent_weight * avg_parent_score
+
+        enriched_scores.append({
+            **leaf_dict,
+            "score": blended_score,
+            "leaf_score": leaf_score,
+            "parent_context_score": avg_parent_score,
+        })
+
+    # Sort by blended score
+    enriched_scores.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+
+    # Sibling-aware re-ranking (Improvement 3)
+    topk_candidates = _rerank_by_sibling_diversity(enriched_scores, top_k)
 
     best_leaf = topk_candidates[0] if topk_candidates else None
     best_route = _build_route_annotations_for_leaf(
@@ -189,17 +217,17 @@ def flat_route(
             best_path.get("path_nodes"),
             float(best_path.get("score", 0.0)),
         )
-        path_nodes = best_path.get("path_nodes") or []
-        if path_nodes:
+        path_nodes = best_path.get("path_nodes")
+        if path_nodes is not None and len(path_nodes) > 0:
             best_leaf = dict(path_nodes[-1])
             best_leaf["score"] = float(best_path.get("score", 0.0))
         best_leaf_score = float(best_path.get("score", 0.0))
 
     topk_routes: List[Dict[str, Any]] = []
     for path_candidate in topk_paths:
-        path_nodes = path_candidate.get("path_nodes") or []
+        path_nodes = path_candidate.get("path_nodes")
         leaf_node = None
-        if path_nodes:
+        if path_nodes is not None and len(path_nodes) > 0:
             leaf_node = dict(path_nodes[-1])
             leaf_node["score"] = float(path_candidate.get("score", 0.0))
         topk_routes.append(
@@ -223,17 +251,21 @@ def flat_route(
 
 def compute_top_down_routes(
     sentence_embeddings: List[Dict[str, Any]],
-    taxonomy_embedded: pd.DataFrame,
+    taxonomy_embedded: Dict[str, Any],
+    taxonomy_key: str,
     top_k: int,
 ) -> List[Dict[str, Any]]:
     """Compute top-down routes for every inference sample."""
+
+    # Load the specific taxonomy partition
+    taxonomy_df = taxonomy_embedded[taxonomy_key]()
 
     results: List[Dict[str, Any]] = []
     for record in sentence_embeddings:
         text = record.get("text", "")
         td = top_down_route(
             input_embedding=record.get("embedding"),
-            taxonomy_embedded=taxonomy_embedded,
+            taxonomy_embedded=taxonomy_df,
             top_k=top_k,
         )
         results.append(
@@ -252,17 +284,21 @@ def compute_top_down_routes(
 
 def compute_bottom_up_routes(
     sentence_embeddings: List[Dict[str, Any]],
-    taxonomy_embedded: pd.DataFrame,
+    taxonomy_embedded: Dict[str, Any],
+    taxonomy_key: str,
     top_k: int,
 ) -> List[Dict[str, Any]]:
     """Compute bottom-up routes leveraging existing embeddings."""
+
+    # Load the specific taxonomy partition
+    taxonomy_df = taxonomy_embedded[taxonomy_key]()
 
     outputs: List[Dict[str, Any]] = []
 
     for record in sentence_embeddings:
         bu = bottom_up_route(
             input_embedding=record.get("embedding"),
-            taxonomy_embedded=taxonomy_embedded,
+            taxonomy_embedded=taxonomy_df,
             top_k=top_k,
         )
         outputs.append(
@@ -279,19 +315,124 @@ def compute_bottom_up_routes(
     return outputs
 
 
+def hybrid_bottom_up_flat_route(
+    input_embedding: List[float],
+    taxonomy_embedded: pd.DataFrame,
+    taxonomy_full_paths: pd.DataFrame,
+    top_k: int = 5,
+) -> Dict[str, Any]:
+    """Hybrid routing: bottom-up leaf candidates validated with full path scores.
+
+    This combines the precision of bottom-up leaf scoring with the contextual
+    validation of flat routing by re-scoring leaf candidates using their full paths.
+
+    Args:
+        input_embedding: Input text embedding vector
+        taxonomy_embedded: Full taxonomy with embeddings
+        taxonomy_full_paths: Pre-computed full paths with embeddings
+        top_k: Number of top candidates to return
+    """
+
+    # Step 1: Get bottom-up leaf candidates
+    leaves = taxonomy_embedded[taxonomy_embedded["isLeaf"].astype(bool)]
+    leaf_scores = scoring_utils.score_candidates(input_embedding, leaves)
+    topk_candidates = leaf_scores[:top_k * 2]  # Get 2x candidates for re-ranking
+
+    # Step 2: For each candidate, find its full path and re-score
+    path_rescores = []
+    for candidate in topk_candidates:
+        leaf_code = candidate.get("code")
+
+        # Find matching path in taxonomy_full_paths
+        matching_paths = taxonomy_full_paths[
+            taxonomy_full_paths["leaf_code"] == leaf_code
+        ]
+
+        if not matching_paths.empty:
+            path_record = matching_paths.iloc[0]
+            path_embedding = path_record.get("embedding")
+
+            if path_embedding is not None and isinstance(path_embedding, (list, np.ndarray)):
+                # Re-score using full path embedding
+                path_score = float(
+                    np.dot(input_embedding, path_embedding) /
+                    (np.linalg.norm(input_embedding) * np.linalg.norm(path_embedding))
+                )
+
+                # Blend: 50% leaf score, 50% path score
+                hybrid_score = 0.5 * candidate.get("score", 0.0) + 0.5 * path_score
+
+                path_rescores.append({
+                    **candidate,
+                    "leaf_score": candidate.get("score", 0.0),
+                    "path_score": path_score,
+                    "score": hybrid_score,  # Override with hybrid score
+                    "path_nodes": path_record.get("path_nodes"),
+                    "path_text": path_record.get("path_text"),
+                })
+
+    # Step 3: Sort by hybrid score
+    path_rescores.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+    topk_paths = path_rescores[:top_k]
+
+    best_path = topk_paths[0] if topk_paths else None
+    best_route = []
+    best_leaf = None
+    best_leaf_score = None
+
+    if best_path:
+        best_route = _build_route_annotations_from_path_nodes(
+            best_path.get("path_nodes"),
+            float(best_path.get("score", 0.0)),
+        )
+        path_nodes = best_path.get("path_nodes")
+        if path_nodes is not None and len(path_nodes) > 0:
+            best_leaf = dict(path_nodes[-1] if isinstance(path_nodes[-1], dict) else {})
+            best_leaf["score"] = float(best_path.get("score", 0.0))
+        best_leaf_score = float(best_path.get("score", 0.0))
+
+    topk_routes: List[Dict[str, Any]] = []
+    for path_candidate in topk_paths:
+        path_nodes = path_candidate.get("path_nodes")
+        leaf_node = None
+        if path_nodes is not None and len(path_nodes) > 0:
+            leaf_node = dict(path_nodes[-1] if isinstance(path_nodes[-1], dict) else {})
+            leaf_node["score"] = float(path_candidate.get("score", 0.0))
+        topk_routes.append(
+            {
+                "leaf": leaf_node,
+                "score": float(path_candidate.get("score", 0.0)),
+                "route": _build_route_annotations_from_path_nodes(
+                    path_nodes,
+                    float(path_candidate.get("score", 0.0)),
+                ),
+            }
+        )
+
+    return {
+        "best_leaf": best_leaf,
+        "best_leaf_score": best_leaf_score,
+        "best_route": best_route,
+        "topk": topk_routes,
+    }
+
+
 def compute_flat_routes(
     sentence_embeddings: List[Dict[str, Any]],
-    taxonomy_full_paths: pd.DataFrame,
+    taxonomy_full_paths: Dict[str, Any],
+    taxonomy_key: str,
     top_k: int,
 ) -> List[Dict[str, Any]]:
     """Compute flat Top-K similarity against full taxonomy paths."""
 
-    paths_df = taxonomy_full_paths.copy()
+    # Load the specific taxonomy partition
+    flat_taxonomy_df = taxonomy_full_paths[taxonomy_key]()
+
     results: List[Dict[str, Any]] = []
     for record in sentence_embeddings:
         fr = flat_route(
             input_embedding=record.get("embedding"),
-            taxonomy_full_paths=paths_df,
+            taxonomy_full_paths=flat_taxonomy_df,
             top_k=top_k,
         )
         results.append(
@@ -308,28 +449,69 @@ def compute_flat_routes(
     return results
 
 
+def compute_hybrid_routes(
+    sentence_embeddings: List[Dict[str, Any]],
+    taxonomy_embedded: Dict[str, Any],
+    taxonomy_full_paths: Dict[str, Any],
+    taxonomy_key: str,
+    top_k: int,
+) -> List[Dict[str, Any]]:
+    """Compute hybrid bottom-up + flat routes for improved accuracy."""
+
+    # Load the specific taxonomy partitions
+    taxonomy_df = taxonomy_embedded[taxonomy_key]()
+    flat_taxonomy_df = taxonomy_full_paths[taxonomy_key]()
+
+    results: List[Dict[str, Any]] = []
+    for record in sentence_embeddings:
+        hybrid = hybrid_bottom_up_flat_route(
+            input_embedding=record.get("embedding"),
+            taxonomy_embedded=taxonomy_df,
+            taxonomy_full_paths=flat_taxonomy_df,
+            top_k=top_k,
+        )
+        results.append(
+            {
+                "sentenceId": record.get("sentence_id"),
+                "text": record.get("text"),
+                "taxonomyKey": record.get("taxonomyKey"),
+                "hybrid_best_leaf": hybrid.get("best_leaf"),
+                "hybrid_best_leaf_score": hybrid.get("best_leaf_score"),
+                "hybrid_best_route": hybrid.get("best_route", []),
+                "hybrid_topk_routes": hybrid.get("topk", []),
+            }
+        )
+    return results
+
+
 def compare_routes(
     topdown_results: List[Dict[str, Any]],
     bottomup_results: List[Dict[str, Any]],
     flat_results: List[Dict[str, Any]],
+    hybrid_results: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Merge signals from top-down, bottom-up, and flat similarity."""
+    """Merge signals from top-down, bottom-up, flat, and hybrid routing."""
 
     bottom_map = {record["sentenceId"]: record for record in bottomup_results}
     flat_map = {record["sentenceId"]: record for record in flat_results}
+    hybrid_map = {record["sentenceId"]: record for record in hybrid_results}
     compared: List[Dict[str, Any]] = []
 
     for top in topdown_results:
         sid = top.get("sentenceId")
         bottom = bottom_map.get(sid, {})
         flat = flat_map.get(sid, {})
+        hybrid = hybrid_map.get(sid, {})
 
         top_best = top.get("topdown_best_leaf")
         bottom_best = bottom.get("bottomup_best_leaf")
         flat_best = flat.get("flat_best_leaf")
+        hybrid_best = hybrid.get("hybrid_best_leaf")
         top_route = top.get("topdown_best_route") or []
         bottom_route = bottom.get("bottomup_best_route") or []
         flat_best_route = flat.get("flat_best_route") or []
+        hybrid_route = hybrid.get("hybrid_best_route") or []
+
         validation_match = bool(
             _candidate_code(top_best)
             and _candidate_code(bottom_best)
@@ -343,9 +525,11 @@ def compare_routes(
                 "topdown_best_leaf": top_best,
                 "bottomup_best_leaf": bottom_best,
                 "flat_best_leaf": flat_best,
+                "hybrid_best_leaf": hybrid_best,
                 "topdown_topk_routes": top.get("topdown_topk_routes", []),
                 "bottomup_topk_routes": bottom.get("bottomup_topk_routes", []),
                 "flat_topk_routes": flat.get("flat_topk_routes", []),
+                "hybrid_topk_routes": hybrid.get("hybrid_topk_routes", []),
                 "validation_match": validation_match,
                 "conflicts": {
                     "topdown_vs_bottomup": _conflict_flag(
@@ -357,10 +541,17 @@ def compare_routes(
                     "bottomup_vs_flat": _conflict_flag(
                         _candidate_code(bottom_best), _candidate_code(flat_best)
                     ),
+                    "hybrid_vs_bottomup": _conflict_flag(
+                        _candidate_code(hybrid_best), _candidate_code(bottom_best)
+                    ),
+                    "hybrid_vs_flat": _conflict_flag(
+                        _candidate_code(hybrid_best), _candidate_code(flat_best)
+                    ),
                 },
                 "topdown_best_route": top_route,
                 "bottomup_best_route": bottom_route,
                 "flat_best_route": flat_best_route,
+                "hybrid_best_route": hybrid_route,
             }
         )
 
@@ -369,36 +560,48 @@ def compare_routes(
 
 def finalize_predictions(
     compared_results: List[Dict[str, Any]],
-    taxonomy_embedded: pd.DataFrame,
+    taxonomy_embedded: Dict[str, Any],
+    taxonomy_key: str,
     judge_model_name: str,
     encoder_model_name: str,
     debug_level: str = "low",
+    min_confidence: float = 0.4,
+    judge_enabled: bool = True,
 ) -> Dict[str, Any]:
     """Produce the final decision with judge escalation when needed.
 
     Args:
         compared_results: Results from compare_routes
-        taxonomy_embedded: Embedded taxonomy DataFrame
+        taxonomy_embedded: Partitioned taxonomy dataset
+        taxonomy_key: Key to load the specific taxonomy
         judge_model_name: Model name for judge
         encoder_model_name: Model name for encoder
         debug_level: Output verbosity ("low", "medium", "high")
+        min_confidence: Minimum confidence threshold for accepting predictions (Improvement 4)
+        judge_enabled: Whether to use judge for conflict resolution (default: True)
     """
+
+    # Load the specific taxonomy partition
+    taxonomy_df = taxonomy_embedded[taxonomy_key]()
 
     suggestions: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
 
     for record in compared_results:
+        # Confidence thresholding (Improvement 4)
+        # Filter low-confidence predictions to trigger judge escalation
+        record = _apply_confidence_threshold(record, min_confidence)
         flat_topk = record.get("flat_topk_routes", [])
 
         judge_output = None
         classifier_model = encoder_model_name
 
-        should_judge = decide_if_judge_needed(record)
+        should_judge = judge_enabled and decide_if_judge_needed(record)
 
         final_decision = None
         final_confidence = None
 
-        # Call judge if needed
+        # Call judge if enabled and needed
         if should_judge:
             candidate_pool = _deduplicate_candidates(
                 _extract_leaf_candidates(record.get("topdown_topk_routes", []))
@@ -415,7 +618,7 @@ def finalize_predictions(
                     taxonomy_context = "\n\n".join(context_segments)
                 else:
                     taxonomy_context = taxonomy_utils.build_taxonomy_context(
-                        taxonomy_embedded, candidate_pool[:5]
+                        taxonomy_df, candidate_pool[:5]
                     )
                 judge_output = judge_utils.run_judge(
                     input_text=record.get("text", ""),
@@ -452,7 +655,7 @@ def finalize_predictions(
 
         if final_decision:
             selected_route = _select_route_for_decision(
-                final_decision, record, taxonomy_embedded
+                final_decision, record, taxonomy_df
             )
         else:
             selected_route = []
@@ -739,7 +942,10 @@ def _build_route_annotations_from_path_nodes(
     """Convert stored path nodes into annotation-style output."""
 
     annotations: List[Dict[str, Any]] = []
-    for node in path_nodes or []:
+    if path_nodes is None:
+        return annotations
+
+    for node in path_nodes:
         annotations.append(
             {
                 "level": int(node.get("level", -1)),
@@ -961,6 +1167,92 @@ def score_dominance(scores: List[Dict[str, Any]]) -> float:
     return float(scores[0].get("score", 0.0)) - float(
         scores[1].get("score", 0.0)
     )
+
+
+def _apply_confidence_threshold(
+    record: Dict[str, Any], min_confidence: float
+) -> Dict[str, Any]:
+    """Filter low-confidence predictions to trigger judge escalation.
+
+    Args:
+        record: Comparison record with results from all three methods
+        min_confidence: Minimum acceptable confidence score
+
+    Returns:
+        Modified record with low-confidence predictions set to None
+    """
+    # Check and filter top-down
+    td_score = record.get("topdown_best_leaf_score")
+    if td_score is not None and td_score < min_confidence:
+        record["topdown_best_leaf"] = None
+        record["topdown_best_leaf_score"] = None
+
+    # Check and filter bottom-up
+    bu_score = record.get("bottomup_best_leaf_score")
+    if bu_score is not None and bu_score < min_confidence:
+        record["bottomup_best_leaf"] = None
+        record["bottomup_best_leaf_score"] = None
+
+    # Check and filter flat
+    flat_score = record.get("flat_best_leaf_score")
+    if flat_score is not None and flat_score < min_confidence:
+        record["flat_best_leaf"] = None
+        record["flat_best_leaf_score"] = None
+
+    return record
+
+
+def _rerank_by_sibling_diversity(
+    candidates: List[Dict[str, Any]], top_k: int
+) -> List[Dict[str, Any]]:
+    """Re-rank candidates to prefer diverse parents (avoid all siblings from one parent).
+
+    Args:
+        candidates: List of scored candidate nodes
+        top_k: Number of top candidates to return
+
+    Returns:
+        Re-ranked list prioritizing parent diversity
+    """
+    if not candidates or len(candidates) <= top_k:
+        return candidates[:top_k]
+
+    # Group by parent
+    parent_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for candidate in candidates:
+        parent = candidate.get("parentCode")
+        if parent not in parent_groups:
+            parent_groups[parent] = []
+        parent_groups[parent].append(candidate)
+
+    # Re-rank: First pass - take best from each parent
+    reranked: List[Dict[str, Any]] = []
+    used_parents: set[str] = set()
+
+    # Sort parent groups by their best candidate's score
+    sorted_parents = sorted(
+        parent_groups.items(),
+        key=lambda x: max(s.get("score", 0.0) for s in x[1]),
+        reverse=True
+    )
+
+    for parent, siblings in sorted_parents:
+        if parent not in used_parents:
+            best_sibling = max(siblings, key=lambda x: x.get("score", 0.0))
+            reranked.append(best_sibling)
+            used_parents.add(parent)
+            if len(reranked) >= top_k:
+                break
+
+    # Second pass: Fill remaining slots with highest scores
+    if len(reranked) < top_k:
+        for candidate in candidates:
+            if len(reranked) >= top_k:
+                break
+            if candidate not in reranked:
+                reranked.append(candidate)
+
+    return reranked[:top_k]
 
 
 def _to_native(obj: Any) -> Any:

@@ -54,6 +54,9 @@ zero_shot_bottomup:
 zero_shot_flat:
   type: MemoryDataset
 
+zero_shot_hybrid:
+  type: MemoryDataset
+
 zero_shot_comparison:
   type: MemoryDataset
 
