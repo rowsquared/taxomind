@@ -34,15 +34,25 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "taxonomy": "taxonomy_enriched",
                     "model_name": "params:embedding.model_name",
                 },
-                outputs="taxonomy_embedded_raw",
+                outputs="taxonomy_embedded",
                 name="embed_taxonomy",
             ),
             node(
-                func=nodes.prepare_partitioned_taxonomy,
-                inputs="taxonomy_embedded_raw",
-                outputs="taxonomy_embedded",
-                name="prepare_partitioned_taxonomy",
+                func=nodes.build_full_paths,
+                inputs="taxonomy_enriched",
+                outputs="taxonomy_full_paths",
+                name="build_full_paths",
+            ),      
+            node(
+                func=nodes.embed_full_paths,
+                inputs={
+                    "paths": "taxonomy_full_paths",
+                    "model_name": "params:zero_shot.model_name",
+                },
+                outputs="taxonomy_full_path_embedded",
+                name="embed_full_paths",
             ),
+
         ]
     )
     return taxonomy_pipeline

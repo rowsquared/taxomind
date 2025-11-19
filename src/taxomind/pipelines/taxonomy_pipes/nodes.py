@@ -44,8 +44,6 @@ def load_taxonomy(taxonomy_dict: Dict[str, Any]) -> pd.DataFrame:
 def add_unknowns(taxonomy: pd.DataFrame) -> pd.DataFrame:
     """Combine labels, definitions, and examples into enriched multilingual text."""
 
-    taxonomy = taxonomy.copy()
-
     levels = sorted({int(level) for level in taxonomy["level"].dropna().tolist()})
     max_level = max(levels) if levels else 0
     existing_codes = set(taxonomy["code"].astype(str))
@@ -91,25 +89,82 @@ def add_unknowns(taxonomy: pd.DataFrame) -> pd.DataFrame:
 def enrich_labels(taxonomy: pd.DataFrame) -> pd.DataFrame:
     """Combine labels, definitions, and examples into enriched multilingual text."""
 
-    taxonomy = taxonomy.copy()
     taxonomy["enriched_text"] = taxonomy.apply(
         taxonomy_utils.compose_text, axis=1
     )
     return taxonomy
 
 
-def embed_taxonomy(taxonomy: pd.DataFrame, model_name: str) -> pd.DataFrame:
+def embed_taxonomy(taxonomy: pd.DataFrame, model_name: str) -> Dict[str, pd.DataFrame]:
     """Generate cross-lingual embeddings for the enriched taxonomy."""
 
-    taxonomy = taxonomy.copy()
+    taxonomy_key = taxonomy["taxonomyKey"].iloc[0]
+
     texts = taxonomy["enriched_text"].fillna("").tolist()
     embeddings = embedding_utils.embed_texts(texts, model_name=model_name)
     taxonomy["embedding"] = embeddings
     taxonomy["embedding_model_name"] = model_name
-    return taxonomy
-
-
-def prepare_partitioned_taxonomy(taxonomy: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-    """Prepare taxonomy for partitioned saving based on taxonomy_key."""
-    taxonomy_key = taxonomy["taxonomyKey"].iloc[0]
     return {taxonomy_key: taxonomy}
+
+
+def build_full_paths(taxonomy: pd.DataFrame) -> pd.DataFrame:
+    """Return a DataFrame describing every root-to-leaf path in the taxonomy."""
+
+    children: dict[str | None, list[dict]] = {}
+    for _, row in taxonomy.iterrows():
+        parent = row.get("parentCode")
+        node = taxonomy_utils.row_to_node_dict(row)
+        children.setdefault(parent, []).append(node)
+
+    roots = children.get(None, [])
+    paths: List[List[dict]] = []
+
+    def dfs(node: dict, path: List[dict]) -> None:
+        new_path = path + [node]
+        node_children = children.get(node.get("code"), [])
+        is_leaf = bool(node.get("isLeaf")) or not node_children
+        if is_leaf:
+            paths.append(new_path)
+        for child in node_children:
+            dfs(child, new_path)
+
+    for root in roots:
+        dfs(root, [])
+
+    records: List[dict] = []
+    for path_nodes in paths:
+        codes = [node.get("code") for node in path_nodes if node.get("code")]
+        path_code = ">".join(codes)
+        path_text = taxonomy_utils.compose_path_text(path_nodes)
+        leaf = path_nodes[-1]
+        records.append(
+            {
+                "code": path_code,
+                "label": leaf.get("label"),
+                "level": len(path_nodes),
+                "parentCode": None,
+                "isLeaf": True,
+                "leaf_code": leaf.get("code"),
+                "leaf_label": leaf.get("label"),
+                "path_nodes": path_nodes,
+                "path_text": path_text,
+                "path_level_count": len(path_nodes),
+            }
+        )
+
+    return pd.DataFrame(records)
+
+
+def embed_full_paths(paths: pd.DataFrame, model_name: str) -> pd.DataFrame:
+    """Embed the textual representation of all taxonomy paths."""
+
+    paths = paths.copy()
+    if paths.empty:
+        paths["embedding"] = [[] for _ in range(len(paths))]
+        return paths
+    embeddings = embedding_utils.embed_texts(
+        paths["path_text"].fillna("").tolist(), model_name=model_name
+    )
+    paths["embedding"] = embeddings
+    paths["embedding_model_name"] = model_name
+    return paths

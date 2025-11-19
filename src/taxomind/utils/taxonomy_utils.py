@@ -107,54 +107,6 @@ def same_branch(code_a: str | None, code_b: str | None) -> bool:
     return code_a.startswith(code_b) or code_b.startswith(code_a)
 
 
-def build_full_paths(taxonomy: pd.DataFrame) -> pd.DataFrame:
-    """Return a DataFrame describing every root-to-leaf path in the taxonomy."""
-
-    children: dict[str | None, list[dict]] = {}
-    for _, row in taxonomy.iterrows():
-        parent = row.get("parentCode")
-        node = _row_to_node_dict(row)
-        children.setdefault(parent, []).append(node)
-
-    roots = children.get(None, [])
-    paths: List[List[dict]] = []
-
-    def dfs(node: dict, path: List[dict]) -> None:
-        new_path = path + [node]
-        node_children = children.get(node.get("code"), [])
-        is_leaf = bool(node.get("isLeaf")) or not node_children
-        if is_leaf:
-            paths.append(new_path)
-        for child in node_children:
-            dfs(child, new_path)
-
-    for root in roots:
-        dfs(root, [])
-
-    records: List[dict] = []
-    for path_nodes in paths:
-        codes = [node.get("code") for node in path_nodes if node.get("code")]
-        path_code = ">".join(codes)
-        path_text = compose_path_text(path_nodes)
-        leaf = path_nodes[-1]
-        records.append(
-            {
-                "code": path_code,
-                "label": leaf.get("label"),
-                "level": len(path_nodes),
-                "parentCode": None,
-                "isLeaf": True,
-                "leaf_code": leaf.get("code"),
-                "leaf_label": leaf.get("label"),
-                "path_nodes": path_nodes,
-                "path_text": path_text,
-                "path_level_count": len(path_nodes),
-            }
-        )
-
-    return pd.DataFrame(records)
-
-
 def compose_path_text(path_nodes: Sequence[dict]) -> str:
     """Concatenate the textual content of every node in a path."""
 
@@ -172,7 +124,7 @@ def compose_path_text(path_nodes: Sequence[dict]) -> str:
     return "\n\n".join(segment for segment in segments if segment)
 
 
-def _row_to_node_dict(row: pd.Series) -> dict:
+def row_to_node_dict(row: pd.Series) -> dict:
     return {
         "code": row.get("code"),
         "label": row.get("label"),
