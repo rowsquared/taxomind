@@ -4,10 +4,10 @@ embedding:
 zero_shot:
   sample_text: "Job_description: vegetable farmer"
   model_name: "BAAI/bge-m3"
-  topdown_k: 3
-  bottomup_k: 3
-  flat_k: 3
-  hybrid_k: 3
+  topdown_k: 1
+  bottomup_k: 1
+  flat_k: 1
+  hybrid_k: 1
   debug_level: "low"  # Options: "low", "medium", "high"
   # Improvement configurations
   parent_weight: 0.3  # Weight for parent context in bottom-up (0.0-1.0)
@@ -19,4 +19,4 @@ supervised:
 
 judge:
   model_name: "llama3.1:8b"
-  enabled: true  # Set to false to disable judge and use consensus/highest-score fallback
+  enabled: false  # Set to false to disable judge and use consensus/highest-score fallback

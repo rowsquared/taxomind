@@ -94,6 +94,25 @@ def top_down_route(
     leaves = taxonomy_embedded[taxonomy_embedded["isLeaf"].astype(bool)]
     leaf_scores = scoring_utils.score_candidates(input_embedding, leaves)
     topk_candidates = leaf_scores[:top_k]
+
+    # Attach path_nodes to each candidate to avoid taxonomy walks later
+    for candidate in topk_candidates:
+        if candidate and not candidate.get("path_nodes"):
+            parent_codes = taxonomy_utils.get_parent_chain(
+                taxonomy_embedded, candidate.get("code")
+            )
+            path_nodes: List[Dict[str, Any]] = []
+            for code in parent_codes:
+                node_row = taxonomy_embedded[taxonomy_embedded["code"] == code]
+                if not node_row.empty:
+                    path_nodes.append(taxonomy_utils.row_to_candidate(node_row.iloc[0]))
+            # Add leaf itself
+            leaf_node = dict(candidate)
+            if "path_nodes" in leaf_node:
+                del leaf_node["path_nodes"]
+            path_nodes.append(leaf_node)
+            candidate["path_nodes"] = path_nodes
+
     topk_routes = _build_topk_routes(
         topk_candidates, taxonomy_embedded, input_embedding
     )
@@ -172,6 +191,24 @@ def bottom_up_route(
 
     # Sibling-aware re-ranking (Improvement 3)
     topk_candidates = _rerank_by_sibling_diversity(enriched_scores, top_k)
+
+    # Attach path_nodes to each candidate to avoid taxonomy walks later
+    for candidate in topk_candidates:
+        if candidate and not candidate.get("path_nodes"):
+            parent_codes = taxonomy_utils.get_parent_chain(
+                taxonomy_embedded, candidate.get("code")
+            )
+            path_nodes: List[Dict[str, Any]] = []
+            for code in parent_codes:
+                node_row = taxonomy_embedded[taxonomy_embedded["code"] == code]
+                if not node_row.empty:
+                    path_nodes.append(taxonomy_utils.row_to_candidate(node_row.iloc[0]))
+            # Add leaf itself
+            leaf_node = dict(candidate)
+            if "path_nodes" in leaf_node:
+                del leaf_node["path_nodes"]
+            path_nodes.append(leaf_node)
+            candidate["path_nodes"] = path_nodes
 
     best_leaf = topk_candidates[0] if topk_candidates else None
     best_route = _build_route_annotations_for_leaf(
@@ -584,6 +621,12 @@ def finalize_predictions(
     # Load the specific taxonomy partition
     taxonomy_df = taxonomy_embedded[taxonomy_key]()
 
+    # Build lookup tables once for O(1) taxonomy access
+    code_to_row, code_to_parent = _build_taxonomy_lookups(taxonomy_df)
+
+    # Route reconstruction cache to avoid rebuilding identical routes
+    route_cache: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+
     suggestions: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
 
@@ -654,9 +697,19 @@ def finalize_predictions(
                 final_confidence = float(final_decision.get("score", 0.0))
 
         if final_decision:
-            selected_route = _select_route_for_decision(
-                final_decision, record, taxonomy_df
-            )
+            # Check cache first to avoid rebuilding identical routes
+            decision_code = _candidate_code(final_decision)
+            cache_key = (taxonomy_key, decision_code) if decision_code else None
+
+            if cache_key and cache_key in route_cache:
+                selected_route = route_cache[cache_key]
+            else:
+                selected_route = _select_route_for_decision(
+                    final_decision, record, taxonomy_df,
+                    code_to_row=code_to_row, code_to_parent=code_to_parent
+                )
+                if cache_key:
+                    route_cache[cache_key] = selected_route
         else:
             selected_route = []
 
@@ -669,6 +722,32 @@ def finalize_predictions(
         # Determine if judge intervened
         judge_intervened = judge_output is not None
 
+        # Optimize debug output: strip unnecessary data based on debug level
+        if debug_level == "low":
+            # For "low" debug level, strip all topk routes to reduce conversion overhead
+            topdown_topk_routes = []
+            bottomup_topk_routes = []
+            flat_topk_routes_output = []
+        elif debug_level == "medium":
+            # For "medium", limit to top 3 candidates and strip nested route details
+            topdown_topk_routes = [
+                {"leaf": route.get("leaf"), "score": route.get("score")}
+                for route in record.get("topdown_topk_routes", [])[:3]
+            ]
+            bottomup_topk_routes = [
+                {"leaf": route.get("leaf"), "score": route.get("score")}
+                for route in record.get("bottomup_topk_routes", [])[:3]
+            ]
+            flat_topk_routes_output = [
+                {"leaf": route.get("leaf"), "score": route.get("score")}
+                for route in flat_topk[:3]
+            ]
+        else:
+            # For "high", include full topk routes
+            topdown_topk_routes = record.get("topdown_topk_routes", [])
+            bottomup_topk_routes = record.get("bottomup_topk_routes", [])
+            flat_topk_routes_output = flat_topk
+
         # Build output based on debug level
         output = _build_output_by_debug_level(
             sentence_id=record.get("sentenceId"),
@@ -678,9 +757,9 @@ def finalize_predictions(
             conflicts=record.get("conflicts", {}),
             classifier_model=classifier_model,
             judge_intervened=judge_intervened,
-            topdown_topk_routes=record.get("topdown_topk_routes", []),
-            bottomup_topk_routes=record.get("bottomup_topk_routes", []),
-            flat_topk_routes=flat_topk,
+            topdown_topk_routes=topdown_topk_routes,
+            bottomup_topk_routes=bottomup_topk_routes,
+            flat_topk_routes=flat_topk_routes_output,
             debug_level=debug_level,
             final_decision=final_decision,
             final_confidence=final_confidence,
@@ -826,6 +905,27 @@ def judge_resolution(
     }
 
 
+def _build_taxonomy_lookups(
+    taxonomy: pd.DataFrame,
+) -> Tuple[Dict[str, pd.Series], Dict[str, str | None]]:
+    """Build hash maps for O(1) taxonomy lookups.
+
+    Returns:
+        - code_to_row: Direct access to taxonomy row by code
+        - code_to_parent: Direct access to parent code
+    """
+    code_to_row: Dict[str, pd.Series] = {}
+    code_to_parent: Dict[str, str | None] = {}
+
+    for _, row in taxonomy.iterrows():
+        code = row.get("code")
+        if code:
+            code_to_row[code] = row
+            code_to_parent[code] = row.get("parentCode")
+
+    return code_to_row, code_to_parent
+
+
 def _build_topk_routes(
     candidates: List[Dict[str, Any]],
     taxonomy: pd.DataFrame,
@@ -854,21 +954,33 @@ def _build_route_annotations_for_leaf(
     leaf: Dict[str, Any] | None,
     taxonomy: pd.DataFrame,
     input_embedding: List[float] | None,
+    code_to_row: Dict[str, pd.Series] | None = None,
+    code_to_parent: Dict[str, str | None] | None = None,
 ) -> List[Dict[str, Any]]:
     """Construct annotation-style routes using taxonomy embeddings."""
 
-    route_codes = _extract_route_codes(leaf, taxonomy)
+    route_codes = _extract_route_codes(leaf, taxonomy, code_to_parent)
     if not route_codes:
         return []
 
     rows: List[pd.Series] = []
-    for code in route_codes:
-        if code is None:
-            continue
-        match = taxonomy[taxonomy["code"] == code]
-        if match.empty:
-            continue
-        rows.append(match.iloc[0])
+    # Use lookup table if available for O(1) row access
+    if code_to_row is not None:
+        for code in route_codes:
+            if code is None:
+                continue
+            row = code_to_row.get(code)
+            if row is not None:
+                rows.append(row)
+    else:
+        # Fallback to pandas filtering
+        for code in route_codes:
+            if code is None:
+                continue
+            match = taxonomy[taxonomy["code"] == code]
+            if match.empty:
+                continue
+            rows.append(match.iloc[0])
 
     if not rows:
         return []
@@ -906,7 +1018,9 @@ def _build_route_annotations_for_leaf(
 
 
 def _extract_route_codes(
-    leaf: Dict[str, Any] | None, taxonomy: pd.DataFrame
+    leaf: Dict[str, Any] | None,
+    taxonomy: pd.DataFrame,
+    code_to_parent: Dict[str, str | None] | None = None,
 ) -> List[str]:
     """Trace parent relationships to produce a root-to-leaf code path."""
 
@@ -925,13 +1039,21 @@ def _extract_route_codes(
     visited: set[str] = set()
     current_code = leaf.get("leaf_code") or leaf.get("code")
 
-    while current_code and current_code not in visited:
-        visited.add(current_code)
-        codes.insert(0, current_code)
-        parent_row = taxonomy[taxonomy["code"] == current_code]
-        if parent_row.empty:
-            break
-        current_code = parent_row.iloc[0].get("parentCode")
+    # Use lookup table if available for O(1) parent access
+    if code_to_parent is not None:
+        while current_code and current_code not in visited:
+            visited.add(current_code)
+            codes.insert(0, current_code)
+            current_code = code_to_parent.get(current_code)
+    else:
+        # Fallback to pandas filtering
+        while current_code and current_code not in visited:
+            visited.add(current_code)
+            codes.insert(0, current_code)
+            parent_row = taxonomy[taxonomy["code"] == current_code]
+            if parent_row.empty:
+                break
+            current_code = parent_row.iloc[0].get("parentCode")
 
     return codes
 
@@ -991,6 +1113,8 @@ def _build_annotations(
                 }
             )
     return annotations
+
+
 def _default_unknown_annotation() -> List[Dict[str, Any]]:
     return [
         {
@@ -1087,36 +1211,46 @@ def _select_route_for_decision(
     decision: Dict[str, Any] | None,
     record: Dict[str, Any],
     taxonomy: pd.DataFrame,
+    code_to_row: Dict[str, pd.Series] | None = None,
+    code_to_parent: Dict[str, str | None] | None = None,
 ) -> List[Dict[str, Any]]:
-    """Build annotations for the final decision route."""
+    """Build annotations for the final decision route with per-level confidence scores."""
 
     if not decision:
         return []
 
     if decision.get("path_nodes"):
         base_route = _build_route_annotations(decision.get("path_nodes"))
-    else:
-        code = _candidate_code(decision)
-        base_route = []
-        candidate_routes = [
-            record.get("topdown_best_route"),
-            record.get("bottomup_best_route"),
-            record.get("flat_best_route"),
-        ]
-        for route in candidate_routes:
-            annotations = _normalize_annotations(route)
-            if annotations and code and _route_matches_code(annotations, code):
-                base_route = annotations
-                break
+        # Use the leaf score for all levels since path_nodes come from judge
+        # which doesn't have per-level scores
+        return _apply_confidence_to_route(base_route, _candidate_score(decision))
 
-        if not base_route:
-            base_route = _build_route_annotations_for_leaf(
-                decision, taxonomy, input_embedding=None
-            )
+    # Try to reuse existing routes that already have per-level scores
+    code = _candidate_code(decision)
+    base_route = []
+    candidate_routes = [
+        record.get("topdown_best_route"),
+        record.get("bottomup_best_route"),
+        record.get("flat_best_route"),
+    ]
+    for route in candidate_routes:
+        annotations = _normalize_annotations(route)
+        if annotations and code and _route_matches_code(annotations, code):
+            # Found a matching route with per-level scores - use it!
+            base_route = annotations
+            break
 
-    return _apply_confidence_to_route(
-        base_route, _candidate_score(decision)
-    )
+    if not base_route:
+        # Fallback: build route without input embedding (will use leaf score for all levels)
+        base_route = _build_route_annotations_for_leaf(
+            decision, taxonomy, input_embedding=None,
+            code_to_row=code_to_row, code_to_parent=code_to_parent
+        )
+        # Apply leaf confidence since we couldn't compute per-level scores
+        return _apply_confidence_to_route(base_route, _candidate_score(decision))
+
+    # Return the found route with its original per-level confidence scores
+    return base_route
 
 
 def _route_matches_code(route: List[Dict[str, Any]], code: str) -> bool:
@@ -1257,6 +1391,10 @@ def _rerank_by_sibling_diversity(
 
 def _to_native(obj: Any) -> Any:
     """Recursively convert numpy/pandas scalars to native types."""
+
+    # Early returns for common primitive types (optimization)
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
 
     if isinstance(obj, dict):
         return {key: _to_native(value) for key, value in obj.items()}
