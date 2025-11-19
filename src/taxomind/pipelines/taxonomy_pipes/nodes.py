@@ -110,13 +110,20 @@ def embed_taxonomy(taxonomy: pd.DataFrame, model_name: str) -> Dict[str, pd.Data
 def build_full_paths(taxonomy: pd.DataFrame) -> pd.DataFrame:
     """Return a DataFrame describing every root-to-leaf path in the taxonomy."""
 
-    children: dict[str | None, list[dict]] = {}
+    # Get the taxonomy key from the taxonomy DataFrame
+    if taxonomy.empty:
+        raise ValueError("Cannot build paths from an empty taxonomy DataFrame")
+
+    taxonomy_key = taxonomy["taxonomyKey"].iloc[0]
+
+    children: dict[str, list[dict]] = {}
     for _, row in taxonomy.iterrows():
         parent = row.get("parentCode")
         node = taxonomy_utils.row_to_node_dict(row)
         children.setdefault(parent, []).append(node)
 
-    roots = children.get(None, [])
+    # Root nodes have parentCode = "__root__" (see taxonomy_utils.normalize_parent)
+    roots = children.get("__root__", [])
     paths: List[List[dict]] = []
 
     def dfs(node: dict, path: List[dict]) -> None:
@@ -149,22 +156,26 @@ def build_full_paths(taxonomy: pd.DataFrame) -> pd.DataFrame:
                 "path_nodes": path_nodes,
                 "path_text": path_text,
                 "path_level_count": len(path_nodes),
+                "taxonomyKey": taxonomy_key,
             }
         )
-
     return pd.DataFrame(records)
 
 
-def embed_full_paths(paths: pd.DataFrame, model_name: str) -> pd.DataFrame:
+def embed_full_paths(taxonomy: pd.DataFrame, model_name: str) -> Dict[str, pd.DataFrame]:
     """Embed the textual representation of all taxonomy paths."""
+    if taxonomy.empty:
+        raise ValueError("Cannot embed an empty taxonomy paths DataFrame")
 
-    paths = paths.copy()
-    if paths.empty:
-        paths["embedding"] = [[] for _ in range(len(paths))]
-        return paths
+    taxonomy_key = taxonomy["taxonomyKey"].iloc[0]
+
+    if taxonomy_key is None or pd.isna(taxonomy_key):
+        raise ValueError("taxonomyKey is None in the paths DataFrame. Ensure build_full_paths sets it correctly.")
+
     embeddings = embedding_utils.embed_texts(
-        paths["path_text"].fillna("").tolist(), model_name=model_name
+        taxonomy["path_text"].fillna("").tolist(), model_name=model_name
     )
-    paths["embedding"] = embeddings
-    paths["embedding_model_name"] = model_name
-    return paths
+    taxonomy["embedding"] = embeddings
+    taxonomy["embedding_model_name"] = model_name
+    return {taxonomy_key: taxonomy}
+

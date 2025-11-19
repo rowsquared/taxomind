@@ -112,15 +112,8 @@ def compose_path_text(path_nodes: Sequence[dict]) -> str:
 
     segments: List[str] = []
     for idx, node in enumerate(path_nodes, 1):
-        label = node.get("label") or ""
-        definition = node.get("definition") or ""
-        examples = node.get("examples") or ""
-        parts = [f"Level {idx}: {label}".strip()]
-        if definition:
-            parts.append(f"Definition: {definition}")
-        if examples:
-            parts.append(f"Examples: {examples}")
-        segments.append("\n".join(parts).strip())
+        segment = compose_text(node)
+        segments.append(segment)
     return "\n\n".join(segment for segment in segments if segment)
 
 

@@ -42,11 +42,11 @@ def create_pipeline(**kwargs) -> Pipeline:
                 inputs="taxonomy_enriched",
                 outputs="taxonomy_full_paths",
                 name="build_full_paths",
-            ),      
+            ),
             node(
                 func=nodes.embed_full_paths,
                 inputs={
-                    "paths": "taxonomy_full_paths",
+                    "taxonomy": "taxonomy_full_paths",
                     "model_name": "params:zero_shot.model_name",
                 },
                 outputs="taxonomy_full_path_embedded",

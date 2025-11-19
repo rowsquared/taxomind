@@ -3,7 +3,7 @@
 
 taxonomy_request:
   type: json.JSONDataset
-  filepath: data/01_raw/taxonomy_request.json
+  filepath: data/01_raw/isco_taxonomy_request.json
   save_args:
     indent: 2
     ensure_ascii: false
@@ -20,21 +20,20 @@ taxonomy_validated:
 taxonomy_enriched:
   type: MemoryDataset
 
-taxonomy_embedded_raw:
-  type: MemoryDataset
-
 taxonomy_embedded:
   type: partitions.PartitionedDataset
   path: data/03_primary/taxonomies
   dataset: pandas.ParquetDataset
   filename_suffix: .parquet
 
-
 taxonomy_full_paths:
   type: MemoryDataset
 
-taxonomy_full_path_embeddings:
-  type: MemoryDataset
+taxonomy_full_path_embedded:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/flat_taxonomies
+  dataset: pandas.ParquetDataset
+  filename_suffix: .parquet
 
 isco_test_sentences:
   type: json.JSONDataset
