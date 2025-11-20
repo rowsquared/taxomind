@@ -7,6 +7,7 @@ This guide walks you through deploying the Taxomind API to Coolify.
 - Coolify instance running
 - Git repository with your code
 - Generated API token (see below)
+- Python 3.13 (Docker image uses python:3.13-slim)
 
 ## Step 1: Generate Production API Token
 

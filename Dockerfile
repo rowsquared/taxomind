@@ -1,5 +1,5 @@
 # Taxomind API - Production Dockerfile for Coolify
-FROM python:3.10-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
