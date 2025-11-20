@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
+from taxomind.services.api.auth import verify_token
 from taxomind.services.api.models import (
     TaxonomyJobResponse,
     TaxonomyRequest,
@@ -22,7 +23,10 @@ router = APIRouter(prefix="", tags=["taxonomies"])
 
 
 @router.post(
-    "/taxonomies", status_code=202, response_model=TaxonomyJobResponse
+    "/taxonomies",
+    status_code=202,
+    response_model=TaxonomyJobResponse,
+    dependencies=[Depends(verify_token)],
 )
 async def create_taxonomy(
     request: TaxonomyRequest,
@@ -75,7 +79,9 @@ async def create_taxonomy(
 
 
 @router.get(
-    "/taxonomies/{job_id}/status", response_model=TaxonomyStatusResponse
+    "/taxonomies/{job_id}/status",
+    response_model=TaxonomyStatusResponse,
+    dependencies=[Depends(verify_token)],
 )
 async def get_taxonomy_status(
     job_id: str,

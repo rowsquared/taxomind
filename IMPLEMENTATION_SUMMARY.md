@@ -2,7 +2,11 @@
 
 ## Overview
 
-Successfully implemented an asynchronous REST API for creating taxonomies using FastAPI with background job processing. The API follows best practices for handling long-running operations by immediately returning a job ID and providing status polling.
+Successfully implemented two asynchronous REST APIs using FastAPI with background job processing:
+1. **Taxonomy API** - Create and manage taxonomies
+2. **Labeling API** - Zero-shot classification of text batches
+
+Both APIs follow best practices for handling long-running operations by immediately returning a job ID and providing status polling.
 
 ## Implementation Details
 
@@ -16,7 +20,9 @@ Successfully implemented an asynchronous REST API for creating taxonomies using 
 
 ### Files Created
 
-#### 1. **API Models** - [src/taxomind/services/api/models.py](src/taxomind/services/api/models.py)
+#### Taxonomy API
+
+##### 1. **Taxonomy API Models** - [src/taxomind/services/api/models.py](src/taxomind/services/api/models.py)
 Pydantic models for request/response validation:
 - `TaxonomyNode` - Individual taxonomy node schema
 - `TaxonomyData` - Complete taxonomy structure
@@ -24,34 +30,64 @@ Pydantic models for request/response validation:
 - `TaxonomyJobResponse` - Job creation response
 - `TaxonomyStatusResponse` - Status check response
 
-#### 2. **Job Store** - [src/taxomind/storage/job_store.py](src/taxomind/storage/job_store.py)
-Thread-safe in-memory job tracking:
-- `JobStore` class with create/update/get operations
-- Singleton pattern for global access
-- Thread-safe using locks
-- Timezone-aware datetime handling
-
-#### 3. **Taxonomy Service** - [src/taxomind/services/api/taxonomy_service.py](src/taxomind/services/api/taxonomy_service.py)
+##### 2. **Taxonomy Service** - [src/taxomind/services/api/taxonomy_service.py](src/taxomind/services/api/taxonomy_service.py)
 Kedro pipeline integration:
 - `TaxonomyPipelineService` - Executes taxonomy_pipe asynchronously
 - Updates job status throughout pipeline execution
 - Handles errors and updates job state accordingly
 - Bootstrap Kedro project once on initialization
 
-#### 4. **API Router** - [src/taxomind/services/api/taxonomy_router.py](src/taxomind/services/api/taxonomy_router.py)
+##### 3. **Taxonomy Router** - [src/taxomind/services/api/taxonomy_router.py](src/taxomind/services/api/taxonomy_router.py)
 FastAPI endpoints:
 - `POST /taxonomies` - Create taxonomy (returns job ID)
 - `GET /taxonomies/{job_id}/status` - Check job status
 
-#### 5. **FastAPI App** - [src/taxomind/services/api/fastapi_app.py](src/taxomind/services/api/fastapi_app.py)
-Updated to include taxonomy router and removed old zero_shot_router
+#### Labeling API
 
-#### 6. **Startup Script** - [scripts/start_api.py](scripts/start_api.py)
+##### 4. **Labeling API Models** - [src/taxomind/services/api/labeling_models.py](src/taxomind/services/api/labeling_models.py)
+Pydantic models for labeling:
+- `LabelingSentence` - Input sentence with dynamic fields
+- `LabelingRequest` - POST request body
+- `Annotation` - Classification at a specific level
+- `SentenceSuggestion` - Suggestions for a sentence
+- `SentenceError` - Error information
+- `LabelingResponse` - Final results
+- `LabelingJobResponse` - Job creation response
+- `LabelingStatusResponse` - Status check response
+
+##### 5. **Labeling Service** - [src/taxomind/services/api/labeling_service.py](src/taxomind/services/api/labeling_service.py)
+Zero-shot pipeline integration:
+- `LabelingPipelineService` - Executes zero_shot_pipe asynchronously
+- Transforms pipeline output to API format
+- Updates job status with progress
+- Stores results in job store
+
+##### 6. **Labeling Router** - [src/taxomind/services/api/labeling_router.py](src/taxomind/services/api/labeling_router.py)
+FastAPI endpoints:
+- `POST /label` - Submit labeling job (returns job ID)
+- `GET /label/{job_id}/status` - Check status and get results
+
+#### Shared Components
+
+##### 7. **Job Store** - [src/taxomind/storage/job_store.py](src/taxomind/storage/job_store.py)
+Thread-safe in-memory job tracking:
+- `JobStore` class with create/update/get operations
+- Singleton pattern for global access
+- Thread-safe using locks
+- Timezone-aware datetime handling
+- Shared by both APIs
+
+##### 8. **FastAPI App** - [src/taxomind/services/api/fastapi_app.py](src/taxomind/services/api/fastapi_app.py)
+Main application with both routers
+
+##### 9. **Startup Script** - [scripts/start_api.py](scripts/start_api.py)
 Convenient server startup script
 
-#### 7. **Documentation**
-- [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) - Complete API reference
-- [docs/API_QUICKSTART.md](docs/API_QUICKSTART.md) - Quick start guide
+##### 10. **Documentation**
+- [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) - Taxonomy API reference
+- [docs/API_QUICKSTART.md](docs/API_QUICKSTART.md) - Taxonomy quick start
+- [docs/LABELING_API_DOCUMENTATION.md](docs/LABELING_API_DOCUMENTATION.md) - Labeling API reference
+- [docs/LABELING_API_QUICKSTART.md](docs/LABELING_API_QUICKSTART.md) - Labeling quick start
 
 ### Files Removed
 
@@ -61,7 +97,9 @@ Convenient server startup script
 
 ## API Endpoints
 
-### POST /taxonomies
+### Taxonomy Endpoints
+
+#### POST /taxonomies
 
 Creates a new taxonomy asynchronously.
 
@@ -88,9 +126,9 @@ Creates a new taxonomy asynchronously.
 }
 ```
 
-### GET /taxonomies/{job_id}/status
+#### GET /taxonomies/{job_id}/status
 
-Retrieves job status.
+Retrieves taxonomy job status.
 
 **Response (200 OK):**
 ```json
@@ -102,6 +140,67 @@ Retrieves job status.
   "error": null,
   "created_at": "2025-11-19T18:30:00Z",
   "completed_at": "2025-11-19T18:35:30Z"
+}
+```
+
+### Labeling Endpoints
+
+#### POST /label
+
+Submits a batch of sentences for zero-shot classification.
+
+**Request:**
+```json
+{
+  "taxonomyKey": "ISCO",
+  "batchId": "batch_001",
+  "sentences": [
+    {
+      "sentence_id": "sent_001",
+      "fields": {
+        "Job Description": "software developer",
+        "Industry": "technology"
+      }
+    }
+  ]
+}
+```
+
+**Response (202 Accepted):**
+```json
+{
+  "job_id": "uuid",
+  "batch_id": "batch_001",
+  "status": "pending",
+  "message": "Labeling job started",
+  "created_at": "2025-11-19T18:30:00Z"
+}
+```
+
+#### GET /label/{job_id}/status
+
+Retrieves labeling job status and results.
+
+**Response (200 OK - Completed):**
+```json
+{
+  "job_id": "uuid",
+  "batch_id": "batch_001",
+  "status": "completed",
+  "progress": 1.0,
+  "result": {
+    "batchId": "batch_001",
+    "suggestions": [
+      {
+        "sentenceId": "sent_001",
+        "annotations": [
+          { "level": 1, "nodeCode": "2", "confidence": 0.95 },
+          { "level": 2, "nodeCode": "21", "confidence": 0.92 }
+        ]
+      }
+    ],
+    "errors": []
+  }
 }
 ```
 

@@ -1,5 +1,21 @@
 # Taxomind API Quick Start
 
+> **Note:** For the complete consolidated guide, see [API_COMPLETE_GUIDE.md](./API_COMPLETE_GUIDE.md)
+
+## Authentication Setup
+
+### 1. Generate Token
+
+```bash
+python scripts/generate_token.py
+```
+
+### 2. Configure Token
+
+```bash
+export API_TOKENS=your-generated-token-here
+```
+
 ## Start the Server
 
 ```bash
@@ -14,6 +30,7 @@ The API will be available at: **http://localhost:8000**
 
 ```bash
 curl -X POST http://localhost:8000/taxonomies \
+  -H "Authorization: Bearer $API_TOKENS" \
   -H "Content-Type: application/json" \
   -d '{
     "action": "create",
@@ -65,7 +82,8 @@ curl -X POST http://localhost:8000/taxonomies \
 Use the `job_id` from step 1:
 
 ```bash
-curl http://localhost:8000/taxonomies/550e8400-e29b-41d4-a716-446655440000/status
+curl http://localhost:8000/taxonomies/550e8400-e29b-41d4-a716-446655440000/status \
+  -H "Authorization: Bearer $API_TOKENS"
 ```
 
 **Response (while processing):**
@@ -104,8 +122,14 @@ Visit **http://localhost:8000/docs** for interactive API documentation (Swagger 
 import requests
 import time
 
-# API base URL
+# API base URL and authentication
 API_URL = "http://localhost:8000"
+API_TOKEN = "your-token-here"
+
+headers = {
+    "Authorization": f"Bearer {API_TOKEN}",
+    "Content-Type": "application/json"
+}
 
 # Create taxonomy
 taxonomy_data = {
@@ -132,14 +156,14 @@ taxonomy_data = {
 }
 
 # Submit taxonomy
-response = requests.post(f"{API_URL}/taxonomies", json=taxonomy_data)
+response = requests.post(f"{API_URL}/taxonomies", json=taxonomy_data, headers=headers)
 job = response.json()
 job_id = job["job_id"]
 print(f"Job created: {job_id}")
 
 # Poll for status
 while True:
-    status_response = requests.get(f"{API_URL}/taxonomies/{job_id}/status")
+    status_response = requests.get(f"{API_URL}/taxonomies/{job_id}/status", headers=headers)
     status = status_response.json()
 
     print(f"Status: {status['status']} - Progress: {status.get('progress', 0)}")
@@ -158,4 +182,4 @@ else:
 
 ## Full Documentation
 
-See [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) for complete details.
+See [API_COMPLETE_GUIDE.md](./API_COMPLETE_GUIDE.md) for complete details on all endpoints, authentication, and examples.
