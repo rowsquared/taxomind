@@ -31,9 +31,16 @@ Copy one of the generated tokens - you'll need it for Coolify environment variab
 
 - **Name:** `taxomind-api`
 - **Build Pack:** Dockerfile
-- **Port:** `8000`
+- **Ports Exposes:** `8000`
+
+### Healthcheck Tab
+
+Navigate to the **"Healthcheck"** section in the left sidebar:
 - **Health Check Path:** `/health`
-- **Health Check Interval:** `30s`
+- **Health Check Interval:** `30s` (or 30000 milliseconds)
+- **Health Check Timeout:** `10s` (or 10000 milliseconds)
+- **Health Check Retries:** `3`
+- **Health Check Start Period:** `5s` (or 5000 milliseconds)
 
 ### Environment Variables
 
