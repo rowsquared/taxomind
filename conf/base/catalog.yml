@@ -66,25 +66,3 @@ zero_shot_judgement:
   save_args:
     indent: 2
 
-labeled_training_samples:
-  type: pandas.CSVDataset
-  filepath: data/02_intermediate/labeled_samples_multilingual.csv
-  load_args:
-    encoding: utf-8
-
-supervised_training_batches:
-  type: MemoryDataset
-
-supervised_model_registry:
-  type: pickle.PickleDataset
-  filepath: data/06_models/supervised_registry.pkl
-
-multilingual_evaluation_samples:
-  type: pandas.CSVDataset
-  filepath: data/03_primary/multilingual_evaluation_samples.csv
-  load_args:
-    encoding: utf-8
-
-supervised_metrics:
-  type: json.JSONDataset
-  filepath: data/08_reporting/supervised_metrics.json

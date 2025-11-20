@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from taxomind.services.api.auth import verify_token
-from taxomind.services.api.models import (
+from taxomind.services.api.taxonomy_models import (
     TaxonomyJobResponse,
     TaxonomyRequest,
     TaxonomyStatusResponse,

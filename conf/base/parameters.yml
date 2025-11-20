@@ -13,9 +13,6 @@ zero_shot:
   parent_weight: 0.3  # Weight for parent context in bottom-up (0.0-1.0)
   min_confidence: 0.4  # Minimum confidence threshold for predictions
 
-supervised:
-  languages: ["multi"]
-  base_model_name: "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 
 judge:
   model_name: "llama3.1:8b"

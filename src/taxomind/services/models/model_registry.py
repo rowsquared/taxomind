@@ -8,7 +8,6 @@ from typing import Any, Dict
 
 import yaml
 
-from taxomind.services.models.supervised_runner import SupervisedRunner
 from taxomind.services.models.zero_shot_runner import ZeroShotRunner
 
 
@@ -33,24 +32,6 @@ def _get_embedding_model_name() -> str:
     return value
 
 
-def _get_supervised_base_model_name() -> str:
-    params = _load_base_parameters()
-    value = params.get("supervised", {}).get("base_model_name")
-    if not value:
-        raise ValueError(
-            "supervised.base_model_name must be defined in conf/base/parameters.yml"
-        )
-    return value
-
-
-def _get_judge_model_name() -> str:
-    params = _load_base_parameters()
-    value = params.get("judge", {}).get("model_name")
-    if not value:
-        raise ValueError(
-            "judge.model_name must be defined in conf/base/parameters.yml"
-        )
-    return value
 
 
 class ModelRegistry:
@@ -59,17 +40,12 @@ class ModelRegistry:
     def __init__(self) -> None:
         self.zero_shot_runner = ZeroShotRunner(
             model_name=_get_embedding_model_name(),
-            judge_model_name=_get_judge_model_name(),
         )
-        self.supervised_runner = SupervisedRunner(
-            base_model_name=_get_supervised_base_model_name()
-        )
+
 
     def get_zero_shot_runner(self) -> ZeroShotRunner:
         return self.zero_shot_runner
 
-    def get_supervised_runner(self) -> SupervisedRunner:
-        return self.supervised_runner
 
 
 @lru_cache(maxsize=1)
