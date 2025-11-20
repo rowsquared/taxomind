@@ -34,11 +34,11 @@ Click **Deploy** in Coolify and monitor logs.
 
 ```bash
 # Health check
-curl https://your-app.coolify.io/health
+curl https://taxomind-api.rowsquared.org/health
 
 # Auth test
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-     https://your-app.coolify.io/docs
+     https://taxomind-api.rowsquared.org/docs
 ```
 
 ## Files Created
@@ -54,6 +54,6 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete deployment guide.
 
 ## Quick Links
 
-- **Interactive Docs:** `https://your-app.coolify.io/docs`
+- **Interactive Docs:** `https://taxomind-api.rowsquared.org/docs`
 - **API Guide:** [docs/API_COMPLETE_GUIDE.md](docs/API_COMPLETE_GUIDE.md)
 - **Authentication:** [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md)

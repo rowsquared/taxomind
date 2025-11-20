@@ -91,7 +91,7 @@ API will be available at: http://0.0.0.0:8000
 ### Test Health Endpoint
 
 ```bash
-curl https://your-app.coolify.io/health
+curl https://taxomind-api.rowsquared.org/health
 ```
 
 Expected response:
@@ -107,7 +107,7 @@ Expected response:
 
 Without token (should fail):
 ```bash
-curl https://your-app.coolify.io/taxonomies/test/status
+curl https://taxomind-api.rowsquared.org/taxonomies/test/status
 ```
 
 Expected: `{"detail":"Not authenticated"}`
@@ -115,14 +115,14 @@ Expected: `{"detail":"Not authenticated"}`
 With token (should work):
 ```bash
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-     https://your-app.coolify.io/taxonomies/test/status
+     https://taxomind-api.rowsquared.org/taxonomies/test/status
 ```
 
 Expected: `{"detail":"Job test not found"}` (404 - which means auth worked!)
 
 ### Test Interactive Docs
 
-Visit: `https://your-app.coolify.io/docs`
+Visit: `https://taxomind-api.rowsquared.org/docs`
 
 1. Click **"Authorize"** button (lock icon)
 2. Enter your token (without "Bearer" prefix)
@@ -160,7 +160,7 @@ To update tokens or configuration:
 ### Create a Taxonomy
 
 ```bash
-curl -X POST https://your-app.coolify.io/taxonomies \
+curl -X POST https://taxomind-api.rowsquared.org/taxonomies \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d @data/01_raw/isco_taxonomy_request.json
@@ -179,14 +179,14 @@ Response:
 ### Check Job Status
 
 ```bash
-curl https://your-app.coolify.io/taxonomies/{job_id}/status \
+curl https://taxomind-api.rowsquared.org/taxonomies/{job_id}/status \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### Submit Labeling Job
 
 ```bash
-curl -X POST https://your-app.coolify.io/label \
+curl -X POST https://taxomind-api.rowsquared.org/label \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -297,7 +297,7 @@ For multiple instances:
 ## Support
 
 - **Documentation:** See `docs/API_COMPLETE_GUIDE.md`
-- **Interactive Docs:** `https://your-app.coolify.io/docs`
+- **Interactive Docs:** `https://taxomind-api.rowsquared.org/docs`
 - **Issues:** Report in your issue tracker
 
 ## Security Checklist

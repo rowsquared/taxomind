@@ -25,6 +25,7 @@ COPY src/ ./src/
 COPY conf/ ./conf/
 COPY scripts/ ./scripts/
 COPY data/ ./data/
+COPY pyproject.toml ./pyproject.toml
 
 # Set Python path
 ENV PYTHONPATH=/app/src
