@@ -1,0 +1,77 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Environment files (use Coolify env vars instead)
+.env
+.env.*
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Documentation
+*.md
+docs/
+README.md
+API_README.md
+IMPLEMENTATION_SUMMARY.md
+
+# Notebooks
+notebooks/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Kedro
+.kedro/
+
+# Logs
+*.log
+
+# Data - exclude generated/intermediate data
+data/02_intermediate/*
+data/03_primary/*
+data/04_feature/*
+data/05_model_input/*
+data/06_models/*
+data/07_model_output/*
+data/08_reporting/*
+
+# Keep raw data and structure
+!data/01_raw/
+!data/02_intermediate/.gitkeep
+!data/03_primary/.gitkeep
+!data/04_feature/.gitkeep
+!data/05_model_input/.gitkeep
+!data/06_models/.gitkeep
+!data/07_model_output/.gitkeep
+!data/08_reporting/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Other
+node_modules/

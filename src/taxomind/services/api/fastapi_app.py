@@ -48,5 +48,16 @@ app = FastAPI(
     version=__version__,
 )
 
+
+@app.get("/health", tags=["health"])
+async def health_check():
+    """Health check endpoint for monitoring and container orchestration."""
+    return {
+        "status": "healthy",
+        "service": "taxomind-api",
+        "version": __version__,
+    }
+
+
 app.include_router(taxonomy_router.router)
 app.include_router(labeling_router.router)
