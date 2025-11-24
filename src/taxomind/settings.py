@@ -6,10 +6,10 @@ https://docs.kedro.org/en/stable/kedro_project_setup/settings.html."""
 # For example, after creating a hooks.py and defining a ProjectHooks class there, do
 # from taxomind.hooks import ProjectHooks
 
-from taxomind.hooks import ProjectHooks  # noqa: E402
+#from taxomind.hooks import ProjectHooks  # noqa: E402
 
 # Hooks are executed in a Last-In-First-Out (LIFO) order.
-HOOKS = (ProjectHooks(),)
+#HOOKS = (ProjectHooks(),)
 
 # Installed plugins for which to disable hook auto-registration.
 # DISABLE_HOOKS_FOR_PLUGINS = ("kedro-viz",)

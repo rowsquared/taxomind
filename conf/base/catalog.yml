@@ -76,15 +76,27 @@ labeled_training_csv:
 prepared_training_data:
   type: MemoryDataset
 
-training_results:
-  type: json.JSONDataset
-  filepath: data/07_model_output/training_results.json
-  save_args:
-    indent: 2
+trained_models:
+  type: partitions.PartitionedDataset
+  path: data/07_model_output/models
+  dataset: pickle.PickleDataset
+  filename_suffix: .pkl
+
+training_metrics:
+  type: partitions.PartitionedDataset
+  path: data/07_model_output/metrics
+  dataset:
+    type: json.JSONDataset
+    save_args:
+      indent: 2
+  filename_suffix: .json
 
 training_summary:
-  type: json.JSONDataset
-  filepath: data/07_model_output/training_summary.json
-  save_args:
-    indent: 2
+  type: partitions.PartitionedDataset
+  path: data/07_model_output/training_summary
+  dataset:
+    type: json.JSONDataset
+    save_args:
+      indent: 2
+  filename_suffix: .json
 

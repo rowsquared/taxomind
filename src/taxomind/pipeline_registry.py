@@ -19,13 +19,13 @@ def register_pipelines() -> dict[str, Pipeline]:
     taxonomy_pipe = taxonomy_pipeline.create_pipeline()
     zero_shot_pipe = zero_shot_pipeline.create_pipeline()
     training_pipe = training_pipeline.create_pipeline()
-    learning_pipe = training_pipeline.create_learning_pipeline()
+    # learning_pipe = training_pipeline.create_learning_pipeline()  # TODO: Implement learning API functions
 
     pipelines = {
         "taxonomy_pipe": taxonomy_pipe,
         "zero_shot_pipe": zero_shot_pipe,
         "training_pipe": training_pipe,
-        "learning_pipe": learning_pipe,
+        # "learning_pipe": learning_pipe,  # TODO: Implement learning API functions
     }
     pipelines["__default__"] = taxonomy_pipe + zero_shot_pipe
     return pipelines

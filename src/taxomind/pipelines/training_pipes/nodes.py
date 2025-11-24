@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-import pickle
-from pathlib import Path
 from typing import Any, Dict
 
 import pandas as pd
@@ -74,25 +71,20 @@ def load_and_prepare_training_data(labeled_csv: pd.DataFrame) -> Dict[str, Any]:
     return {"data": df, "taxonomy_key": taxonomy_key}
 
 
-def train_and_save_setfit_models(
-    prepared_data: Dict[str, Any], params: Dict[str, Any]
-) -> Dict[str, Any]:
+def train_setfit_models(
+    prepared_data: Dict[str, Any], params: Dict[str, Any], job_config: Dict[str, Any] = None
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Train one SetFit model per hierarchical level.
 
     Args:
         prepared_data: Dictionary with 'data' (DataFrame) and 'taxonomy_key' (str)
         params: SetFit training parameters from conf/base/parameters.yml
+        job_config: Optional job configuration (used by learning pipeline)
 
     Returns:
-        Dictionary containing models and metrics per level:
-            {
-                'taxonomy_key': str,
-                'levels': {
-                    1: {'model': SetFitModel, 'metrics': dict},
-                    2: {'model': SetFitModel, 'metrics': dict},
-                    ...
-                }
-            }
+        Tuple of two dicts, each keyed by taxonomy_key for PartitionedDataset:
+            1. trained_models (PickleDataset): {taxonomy_key: {models: dict}}
+            2. training_metrics (JSONDataset): {taxonomy_key: {metrics: dict}}
     """
     df = prepared_data["data"]
     taxonomy_key = prepared_data["taxonomy_key"]
@@ -113,14 +105,14 @@ def train_and_save_setfit_models(
     device = torch.device("cpu")
 
     levels_data = df.groupby("level")
-    base_output_path = params.get("output_path", "data/07_model_output")
+    all_models = {}
     all_metrics = {}
 
     print(f"\n🔧 Training configuration:")
     print(f"  Device: CPU (forced)")
     print(f"  Base model: {base_model}")
     print(f"  Epochs: {epochs}, Batch size: {batch_size}")
-    print(f"  Output path: {base_output_path}")
+    print(f"  Taxonomy: {taxonomy_key}")
     if level_to_train is not None:
         print(f"  Training ONLY level: {level_to_train}")
 
@@ -268,74 +260,63 @@ def train_and_save_setfit_models(
         print(f"  Validation Accuracy: {accuracy:.4f}")
         print(f"  Validation F1 Score: {f1:.4f}")
 
-        # Save model and metrics immediately to disk
-        level_dir = Path(base_output_path) / taxonomy_key / f"level_{level}"
-        level_dir.mkdir(parents=True, exist_ok=True)
-
-        # Save model
-        model_path = level_dir / "model.pkl"
-        with open(model_path, "wb") as f:
-            pickle.dump(model, f)
-
-        # Save metrics
-        metrics_path = level_dir / "metrics.json"
-        with open(metrics_path, "w") as f:
-            json.dump(metrics, f, indent=2)
-
-        print(f"  ✓ Saved to {level_dir}")
-
-        # Store only metrics in memory (lightweight)
+        # Store model and metrics in memory (catalog will handle persistence)
+        all_models[int(level)] = model
         all_metrics[int(level)] = metrics
 
-        # Clean up memory after each level
-        del model, trainer, train_dataset
+        # Clean up training artifacts
+        del trainer, train_dataset
         if "eval_dataset" in locals() and eval_dataset is not None:
             del eval_dataset
 
         # Force garbage collection
         import gc
         gc.collect()
-        gc.collect()  # Run twice for circular references
 
-    return {
-        "taxonomy_key": taxonomy_key,
-        "metrics": all_metrics,
-        "output_path": base_output_path,
+    print(f"\n✅ Training completed for {taxonomy_key}")
+    print(f"   Trained {len(all_models)} levels")
+
+    # Return two separate outputs keyed by taxonomy_key for PartitionedDatasets
+    trained_models = {
+        taxonomy_key: all_models
     }
 
+    training_metrics = {
+        taxonomy_key: all_metrics
+    }
 
-def create_training_summary(training_results: Dict[str, Any]) -> Dict[str, Any]:
+    return trained_models, training_metrics
+
+
+def create_training_summary(training_metrics: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """Create a summary of training results.
 
     Args:
-        training_results: Results from train_and_save_setfit_models
+        training_metrics: Partitioned metrics from train_setfit_models
+                         Format: {taxonomy_key: {level: metrics_dict, ...}}
 
     Returns:
-        Dictionary with training summary
+        Dictionary keyed by taxonomy_key for PartitionedDataset
     """
-    taxonomy_key = training_results["taxonomy_key"]
-    metrics = training_results["metrics"]
-    output_path = training_results["output_path"]
+    summaries = {}
 
-    summary = {
-        "taxonomy_key": taxonomy_key,
-        "total_levels": len(metrics),
-        "levels_trained": sorted(metrics.keys()),
-        "output_directory": f"{output_path}/{taxonomy_key}",
-        "metrics_by_level": {},
-    }
-
-    for level, level_metrics in metrics.items():
-        summary["metrics_by_level"][level] = {
-            "accuracy": level_metrics["accuracy"],
-            "f1_score": level_metrics["f1_score"],
-            "training_mode": level_metrics["training_mode"],
-            "num_labels": level_metrics["num_labels"],
-            "min_samples_per_class": level_metrics["min_samples_per_class"],
+    for taxonomy_key, metrics in training_metrics.items():
+        summary = {
+            "taxonomy_key": taxonomy_key,
+            "total_levels": len(metrics),
+            "levels_trained": sorted(metrics.keys()),
+            "metrics_by_level": {},
         }
 
-    print(f"\n✅ Training completed for {taxonomy_key}")
-    print(f"   Trained {len(metrics)} levels")
-    print(f"   Models saved to: {output_path}/{taxonomy_key}")
+        for level, level_metrics in metrics.items():
+            summary["metrics_by_level"][level] = {
+                "accuracy": level_metrics["accuracy"],
+                "f1_score": level_metrics["f1_score"],
+                "training_mode": level_metrics["training_mode"],
+                "num_labels": level_metrics["num_labels"],
+                "min_samples_per_class": level_metrics["min_samples_per_class"],
+            }
 
-    return summary
+        summaries[taxonomy_key] = summary
+
+    return summaries

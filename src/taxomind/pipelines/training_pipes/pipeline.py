@@ -22,17 +22,17 @@ def create_pipeline(**kwargs) -> Pipeline:
                 name="load_and_prepare_training_data",
             ),
             node(
-                func=nodes.train_and_save_setfit_models,
+                func=nodes.train_setfit_models,
                 inputs={
                     "prepared_data": "prepared_training_data",
                     "params": "params:setfit",
                 },
-                outputs="training_results",
-                name="train_and_save_setfit_models",
+                outputs=["trained_models", "training_metrics"],
+                name="train_setfit_models",
             ),
             node(
                 func=nodes.create_training_summary,
-                inputs="training_results",
+                inputs="training_metrics",
                 outputs="training_summary",
                 name="create_training_summary",
             ),
@@ -94,18 +94,18 @@ def create_learning_pipeline(**kwargs) -> Pipeline:
                 name="prepare_training_data",
             ),
             node(
-                func=nodes.train_and_save_setfit_models,
+                func=nodes.train_setfit_models,
                 inputs={
                     "prepared_data": "prepared_training_data",
                     "params": "params:setfit",
                     "job_config": "loaded_job_config",  # Pass whole config
                 },
-                outputs="training_results",
+                outputs=["trained_models", "training_metrics"],
                 name="train_models",
             ),
             node(
                 func=nodes.create_training_summary,
-                inputs="training_results",
+                inputs="training_metrics",
                 outputs="training_summary",
                 name="create_summary",
             ),
