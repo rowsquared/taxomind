@@ -17,3 +17,16 @@ zero_shot:
 judge:
   model_name: "llama3.1:8b"
   enabled: false  # Set to false to disable judge and use consensus/highest-score fallback
+
+setfit:
+  base_model: "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+  epochs: 2
+  batch_size: 2
+  learning_rate: 2e-5
+  val_size: 0.1
+  seed: 42
+  output_path: "data/07_model_output"
+  use_only_negative_pairs: true  # For classes with single samples (enables contrastive learning with negative pairs only)
+  num_iterations: 2  # Number of text pairs to generate per example in negative-only mode
+  sampling_strategy: "unique"  # Sampling strategy for negative-only mode: "unique" or "oversampling"
+  level_to_train: null  # Optional: Train only a specific level (e.g., 1, 2, 3). Set to null to train all levels. Note: Training always uses CPU to avoid memory issues

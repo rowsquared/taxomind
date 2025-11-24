@@ -66,3 +66,25 @@ zero_shot_judgement:
   save_args:
     indent: 2
 
+# Training pipeline datasets
+labeled_training_csv:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/labeled_training_data.csv
+  load_args:
+    encoding: utf-8
+
+prepared_training_data:
+  type: MemoryDataset
+
+training_results:
+  type: json.JSONDataset
+  filepath: data/07_model_output/training_results.json
+  save_args:
+    indent: 2
+
+training_summary:
+  type: json.JSONDataset
+  filepath: data/07_model_output/training_summary.json
+  save_args:
+    indent: 2
+
