@@ -100,3 +100,98 @@ training_summary:
       indent: 2
   filename_suffix: .json
 
+# Learning pipeline datasets (API-based incremental training)
+api_training_payload:
+  type: partitions.PartitionedDataset
+  path: data/08_temp_training/payloads
+  dataset:
+    type: json.JSONDataset
+    save_args:
+      indent: 2
+      ensure_ascii: false
+  filename_suffix: .json
+
+job_config:
+  type: partitions.PartitionedDataset
+  path: data/08_temp_training/job_configs
+  dataset:
+    type: json.JSONDataset
+    save_args:
+      indent: 2
+  filename_suffix: .json
+
+validated_payload:
+  type: MemoryDataset
+
+converted_training_data:
+  type: MemoryDataset
+
+existing_training_data:
+  type: partitions.PartitionedDataset
+  path: data/06_training
+  dataset:
+    type: pandas.CSVDataset
+    load_args:
+      encoding: utf-8
+    save_args:
+      encoding: utf-8
+      index: false
+  filename_suffix: _training.csv
+
+persisted_training_data:
+  type: partitions.PartitionedDataset
+  path: data/06_training
+  dataset:
+    type: pandas.CSVDataset
+    load_args:
+      encoding: utf-8
+    save_args:
+      encoding: utf-8
+      index: false
+  filename_suffix: _training.csv
+
+loaded_existing_data:
+  type: MemoryDataset
+
+appended_training_data:
+  type: MemoryDataset
+
+loaded_job_config:
+  type: MemoryDataset
+
+taxonomy_df:
+  type: MemoryDataset
+
+model_version_metadata:
+  type: partitions.PartitionedDataset
+  path: data/07_model_output/versions
+  dataset:
+    type: json.JSONDataset
+    save_args:
+      indent: 2
+  filename_suffix: _version.json
+
+existing_model_version_metadata:
+  type: partitions.PartitionedDataset
+  path: data/07_model_output/versions
+  dataset:
+    type: json.JSONDataset
+    save_args:
+      indent: 2
+  filename_suffix: _version.json
+
+updated_version_metadata:
+  type: MemoryDataset
+
+# Intermediate in-memory datasets for learning pipeline
+trained_models_dict:
+  type: MemoryDataset
+
+training_metrics_dict:
+  type: MemoryDataset
+
+training_summary_dict:
+  type: MemoryDataset
+
+updated_version_metadata_dict:
+  type: MemoryDataset

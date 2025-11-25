@@ -1,0 +1,224 @@
+"""FastAPI router for incremental training with async job tracking."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from uuid import uuid4
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+
+from taxomind.services.api.auth import verify_token
+from taxomind.services.api.learning_models import (
+    LearningJobResponse,
+    LearningRequest,
+    LearningStatusResponse,
+    ProgressInfo,
+    TrainingResult,
+)
+from taxomind.services.api.learning_service import (
+    LearningPipelineService,
+    get_learning_service,
+)
+from taxomind.storage.job_store import JobStore, get_job_store
+
+router = APIRouter(prefix="", tags=["learning"])
+
+
+@router.post(
+    "/learn",
+    status_code=202,
+    response_model=LearningJobResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def create_learning_job(
+    request: LearningRequest,
+    background_tasks: BackgroundTasks,
+    service: LearningPipelineService = Depends(get_learning_service),
+    job_store: JobStore = Depends(get_job_store),
+) -> LearningJobResponse:
+    """
+    Create a new incremental training job by triggering learning pipeline asynchronously.
+
+    This endpoint accepts training sentences with annotations and immediately returns a
+    job ID. The actual model training happens in the background and can take several
+    minutes to hours depending on dataset size and number of hierarchical levels.
+
+    The training process will:
+    1. Validate the training payload against the taxonomy structure
+    2. Convert API format to training data format
+    3. Append new samples to existing training dataset (deduplicating by sentenceId)
+    4. Train SetFit models for all hierarchical levels
+    5. Generate versioned model artifacts with incremented version number
+
+    Use the GET /learn/{job_id}/status endpoint to poll for job completion.
+
+    Args:
+        request: Learning request with taxonomy key and training sentences
+        background_tasks: FastAPI background tasks manager
+        service: Learning pipeline service
+        job_store: Job status storage
+
+    Returns:
+        LearningJobResponse with job_id and initial status (HTTP 202 Accepted)
+
+    Example:
+        ```
+        POST /learn
+        {
+          "taxonomyKey": "ISCO",
+          "sentences": [
+            {
+              "sentenceId": "job-001",
+              "fields": {
+                "job_title": "Software Engineer",
+                "job_description": "Develops web applications"
+              },
+              "annotations": [
+                {"level": 1, "nodeCode": "2"},
+                {"level": 2, "nodeCode": "25"},
+                {"level": 3, "nodeCode": "251"},
+                {"level": 4, "nodeCode": "2512"}
+              ]
+            }
+          ]
+        }
+        ```
+    """
+    # Generate unique job ID
+    job_id = str(uuid4())
+
+    # Create job entry
+    job_store.create_job(
+        job_id=job_id,
+        status="pending",
+        message=f"Training job queued for taxonomy {request.taxonomyKey}",
+        created_at=datetime.now(UTC),
+        taxonomy_key=request.taxonomyKey,
+    )
+
+    # Prepare data for pipeline
+    training_data = {
+        "taxonomyKey": request.taxonomyKey,
+        "sentences": [
+            {
+                "sentenceId": sentence.sentenceId,
+                "fields": sentence.fields,
+                "annotations": [
+                    {
+                        "level": annotation.level,
+                        "nodeCode": annotation.nodeCode,
+                    }
+                    for annotation in sentence.annotations
+                ],
+            }
+            for sentence in request.sentences
+        ],
+    }
+
+    # Add pipeline execution to background tasks
+    background_tasks.add_task(
+        service.run_pipeline,
+        job_id=job_id,
+        taxonomy_key=request.taxonomyKey,
+        training_data=training_data,
+    )
+
+    return LearningJobResponse(
+        jobId=job_id,
+        status="pending",
+        taxonomyKey=request.taxonomyKey,
+        message=f"Training job initiated for taxonomy {request.taxonomyKey}",
+        createdAt=datetime.now(UTC),
+    )
+
+
+@router.get(
+    "/learn/{job_id}/status",
+    response_model=LearningStatusResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def get_learning_status(
+    job_id: str,
+    job_store: JobStore = Depends(get_job_store),
+) -> LearningStatusResponse:
+    """
+    Get the current status of an incremental training job.
+
+    Poll this endpoint to check if the training pipeline has completed.
+    Recommended polling interval: 5-10 seconds for jobs expected to complete
+    within minutes, or 30-60 seconds for longer training runs.
+
+    Response varies by job status:
+    - **pending**: Job queued but not yet started
+    - **running**: Training in progress (includes progress information)
+    - **completed**: Training finished successfully (includes model version and metrics)
+    - **failed**: Training failed (includes error message)
+
+    Args:
+        job_id: The job ID returned from the POST /learn endpoint
+        job_store: Job status storage
+
+    Returns:
+        LearningStatusResponse with current job status, progress,
+        and results (if completed)
+
+    Raises:
+        HTTPException: 404 if job_id is not found
+
+    Example completed response:
+        ```
+        {
+          "jobId": "550e8400-e29b-41d4-a716-446655440000",
+          "status": "completed",
+          "taxonomyKey": "ISCO",
+          "message": "Training completed successfully",
+          "createdAt": "2025-01-24T18:20:45.123Z",
+          "startedAt": "2025-01-24T18:20:47.456Z",
+          "completedAt": "2025-01-24T18:35:12.789Z",
+          "result": {
+            "modelVersion": "ISCO_v5_20250124T182045",
+            "trainingMetrics": {
+              "totalLevels": 4,
+              "levelsSummary": {
+                "1": {"accuracy": 0.95, "f1_score": 0.94, "training_mode": "standard"}
+              }
+            },
+            "trainingDataStats": {
+              "newSamples": 15,
+              "totalSamples": 150,
+              "appendedToExisting": true
+            }
+          }
+        }
+        ```
+    """
+    job = job_store.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Extract result if completed
+    result = None
+    if job.get("status") == "completed" and job.get("result"):
+        result = TrainingResult(**job["result"])
+
+    # Extract progress if running
+    progress = None
+    if job.get("status") == "running" and job.get("progress"):
+        progress_data = job["progress"]
+        if isinstance(progress_data, dict):
+            progress = ProgressInfo(**progress_data)
+
+    return LearningStatusResponse(
+        jobId=job["job_id"],
+        status=job["status"],
+        taxonomyKey=job.get("taxonomy_key", ""),
+        message=job.get("message", ""),
+        createdAt=job["created_at"],
+        startedAt=job.get("started_at"),
+        completedAt=job.get("completed_at"),
+        failedAt=job.get("failed_at"),
+        progress=progress,
+        error=job.get("error"),
+        result=result,
+    )

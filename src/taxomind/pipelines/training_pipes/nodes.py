@@ -292,11 +292,11 @@ def create_training_summary(training_metrics: Dict[str, Dict[str, Any]]) -> Dict
     """Create a summary of training results.
 
     Args:
-        training_metrics: Partitioned metrics from train_setfit_models
+        training_metrics: In-memory metrics from train_setfit_models
                          Format: {taxonomy_key: {level: metrics_dict, ...}}
 
     Returns:
-        Dictionary keyed by taxonomy_key for PartitionedDataset
+        Dictionary keyed by taxonomy_key containing training summary
     """
     summaries = {}
 
@@ -320,3 +320,471 @@ def create_training_summary(training_metrics: Dict[str, Dict[str, Any]]) -> Dict
         summaries[taxonomy_key] = summary
 
     return summaries
+
+
+# ============================================================================
+# Learning Pipeline Nodes (API-based incremental training)
+# ============================================================================
+
+
+def load_job_config(job_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and return job configuration metadata.
+
+    Args:
+        job_config: Job metadata dictionary from API service
+
+    Returns:
+        Validated job configuration
+
+    Raises:
+        ValueError: If required fields are missing
+    """
+    required_fields = ["jobId", "taxonomyKey"]
+    missing_fields = [field for field in required_fields if field not in job_config]
+    if missing_fields:
+        raise ValueError(f"Missing required job config fields: {missing_fields}")
+
+    return job_config
+
+
+def load_taxonomy_for_job(
+    job_config: Dict[str, Any],
+    all_taxonomies: Dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Load the specific taxonomy needed for this job.
+
+    Args:
+        job_config: Job configuration with taxonomyKey
+        all_taxonomies: Dictionary of all taxonomies from PartitionedDataset
+
+    Returns:
+        DataFrame for the requested taxonomy
+
+    Raises:
+        ValueError: If taxonomy not found
+    """
+    taxonomy_key = job_config["taxonomyKey"]
+
+    # Try direct lookup
+    if taxonomy_key in all_taxonomies:
+        taxonomy_data = all_taxonomies[taxonomy_key]
+        # Handle callable (lazy loading)
+        if callable(taxonomy_data):
+            taxonomy_data = taxonomy_data()
+        return taxonomy_data
+
+    # Try with common suffixes
+    for key, value in all_taxonomies.items():
+        if (
+            str(key).endswith(f"/{taxonomy_key}")
+            or str(key).endswith(f"/{taxonomy_key}.parquet")
+            or str(key).endswith(f"{taxonomy_key}.parquet")
+        ):
+            taxonomy_data = value() if callable(value) else value
+            return taxonomy_data
+
+    available = list(all_taxonomies.keys())
+    raise ValueError(
+        f"Taxonomy '{taxonomy_key}' not found. Available: {available}"
+    )
+
+
+def validate_training_payload(
+    api_payload: Dict[str, Any],
+    taxonomy_df: pd.DataFrame,
+) -> Dict[str, Any]:
+    """Validate training payload structure and taxonomy references.
+
+    Args:
+        api_payload: API payload with taxonomyKey and sentences
+        taxonomy_df: Taxonomy DataFrame with embedded representations
+
+    Returns:
+        Validated payload dictionary
+
+    Raises:
+        ValueError: If validation fails with descriptive error message
+    """
+    # Validate payload structure
+    if "taxonomyKey" not in api_payload:
+        raise ValueError("Missing required field: taxonomyKey")
+
+    if "sentences" not in api_payload:
+        raise ValueError("Missing required field: sentences")
+
+    taxonomy_key = api_payload["taxonomyKey"]
+    sentences = api_payload["sentences"]
+
+    if not sentences:
+        raise ValueError("sentences array cannot be empty")
+
+    # Validate taxonomyKey exists in taxonomy_df
+    if taxonomy_key not in taxonomy_df["taxonomyKey"].unique():
+        raise ValueError(
+            f"taxonomyKey '{taxonomy_key}' not found in available taxonomies"
+        )
+
+    # Get taxonomy nodes for validation
+    taxonomy_nodes = taxonomy_df[
+        taxonomy_df["taxonomyKey"] == taxonomy_key
+    ]
+    # Note: taxonomy uses 'code' column, not 'nodeCode'
+    valid_node_codes = set(taxonomy_nodes["code"].astype(str))
+
+    # Validate each sentence
+    for idx, sentence in enumerate(sentences):
+        # Validate required fields
+        if "sentenceId" not in sentence:
+            raise ValueError(f"Sentence at index {idx}: missing 'sentenceId'")
+
+        if "fields" not in sentence:
+            raise ValueError(
+                f"Sentence '{sentence.get('sentenceId')}': missing 'fields'"
+            )
+
+        if "annotations" not in sentence:
+            raise ValueError(
+                f"Sentence '{sentence.get('sentenceId')}': missing 'annotations'"
+            )
+
+        # Validate fields is non-empty
+        if not sentence["fields"]:
+            raise ValueError(
+                f"Sentence '{sentence['sentenceId']}': 'fields' cannot be empty"
+            )
+
+        # Validate annotations
+        annotations = sentence["annotations"]
+        if not annotations:
+            raise ValueError(
+                f"Sentence '{sentence['sentenceId']}': 'annotations' cannot be empty"
+            )
+
+        # Validate annotation structure and node codes
+        seen_levels = set()
+        for ann_idx, annotation in enumerate(annotations):
+            if "level" not in annotation:
+                raise ValueError(
+                    f"Sentence '{sentence['sentenceId']}', "
+                    f"annotation {ann_idx}: missing 'level'"
+                )
+
+            if "nodeCode" not in annotation:
+                raise ValueError(
+                    f"Sentence '{sentence['sentenceId']}', "
+                    f"annotation {ann_idx}: missing 'nodeCode'"
+                )
+
+            level = annotation["level"]
+            node_code = str(annotation["nodeCode"])
+
+            # Check for duplicate levels
+            if level in seen_levels:
+                raise ValueError(
+                    f"Sentence '{sentence['sentenceId']}': "
+                    f"duplicate annotation for level {level}"
+                )
+            seen_levels.add(level)
+
+            # Validate node code exists in taxonomy
+            if node_code not in valid_node_codes:
+                raise ValueError(
+                    f"Sentence '{sentence['sentenceId']}': "
+                    f"nodeCode '{node_code}' not found in taxonomy {taxonomy_key}"
+                )
+
+    return api_payload
+
+
+def convert_api_payload_to_training_data(
+    api_payload: Dict[str, Any],
+    taxonomy_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Convert API payload JSON to training DataFrame format.
+
+    Args:
+        api_payload: Validated API payload with sentences and annotations
+        taxonomy_df: Taxonomy DataFrame for label lookup
+
+    Returns:
+        DataFrame with columns: text, level, label, taxonomyKey, sentenceId
+        (one row per level per sentence)
+    """
+    taxonomy_key = api_payload["taxonomyKey"]
+    sentences = api_payload["sentences"]
+
+    # Get taxonomy for label mapping (code -> label)
+    taxonomy_nodes = taxonomy_df[
+        taxonomy_df["taxonomyKey"] == taxonomy_key
+    ]
+    # Note: taxonomy uses 'code' column, not 'nodeCode'
+    node_to_label = dict(
+        zip(
+            taxonomy_nodes["code"].astype(str),
+            taxonomy_nodes["label"].astype(str),
+        )
+    )
+
+    rows = []
+
+    for sentence in sentences:
+        sentence_id = sentence["sentenceId"]
+        fields = sentence["fields"]
+        annotations = sentence["annotations"]
+
+        # Concatenate all field values into single text
+        text = " ".join(str(value) for value in fields.values() if value)
+
+        # Create one row per annotation (level)
+        for annotation in annotations:
+            level = annotation["level"]
+            node_code = str(annotation["nodeCode"])
+            label = node_to_label.get(node_code, node_code)
+
+            rows.append({
+                "text": text,
+                "level": level,
+                "label": label,
+                "taxonomyKey": taxonomy_key,
+                "sentenceId": sentence_id,
+            })
+
+    return pd.DataFrame(rows)
+
+
+def load_existing_training_data(
+    taxonomy_key: str, existing_data: Dict[str, pd.DataFrame]
+) -> pd.DataFrame:
+    """Load existing training data for the taxonomy, or return empty DataFrame.
+
+    Args:
+        taxonomy_key: Taxonomy identifier extracted from job config (dict or str)
+        existing_data: Partitioned dataset keyed by taxonomy (may be empty dict)
+
+    Returns:
+        Existing training DataFrame or empty DataFrame if not found
+    """
+    # Extract taxonomy_key from job_config if needed
+    if isinstance(taxonomy_key, dict) and "taxonomyKey" in taxonomy_key:
+        taxonomy_key = taxonomy_key["taxonomyKey"]
+
+    # Handle empty partitioned dataset (no existing data at all)
+    if not existing_data:
+        return pd.DataFrame(
+            columns=["text", "level", "label", "taxonomyKey", "sentenceId"]
+        )
+
+    # Try direct lookup
+    if taxonomy_key in existing_data:
+        data = existing_data[taxonomy_key]
+        # Handle callable (lazy loading)
+        if callable(data):
+            data = data()
+        return data.copy()
+
+    # Try with common suffixes
+    for key, value in existing_data.items():
+        if (
+            str(key).endswith(f"/{taxonomy_key}_training")
+            or str(key).endswith(f"/{taxonomy_key}_training.csv")
+            or str(key).endswith(f"{taxonomy_key}_training.csv")
+        ):
+            data = value() if callable(value) else value
+            return data.copy()
+
+    # Return empty DataFrame with expected schema if not found
+    return pd.DataFrame(
+        columns=["text", "level", "label", "taxonomyKey", "sentenceId"]
+    )
+
+
+def append_and_deduplicate_training_data(
+    new_data: pd.DataFrame, existing_data: pd.DataFrame
+) -> pd.DataFrame:
+    """Append new training data to existing, deduplicating by sentenceId.
+
+    Args:
+        new_data: New training samples from API
+        existing_data: Existing training samples (may be empty)
+
+    Returns:
+        Combined DataFrame with duplicates removed (keeping newest)
+    """
+    if existing_data.empty:
+        return new_data.copy()
+
+    # Concatenate
+    combined = pd.concat([existing_data, new_data], ignore_index=True)
+
+    # Deduplicate by sentenceId and level, keeping last occurrence (newest)
+    combined = combined.drop_duplicates(
+        subset=["sentenceId", "level"], keep="last"
+    )
+
+    # Reset index
+    combined = combined.reset_index(drop=True)
+
+    return combined
+
+
+def prepare_training_data_from_dataframe(
+    appended_data: pd.DataFrame,
+) -> Dict[str, Any]:
+    """Convert appended DataFrame to format expected by train_setfit_models.
+
+    Args:
+        appended_data: Combined training DataFrame
+
+    Returns:
+        Dictionary with 'data' (DataFrame) and 'taxonomy_key' (str)
+    """
+    # Extract taxonomy_key
+    unique_keys = appended_data["taxonomyKey"].unique()
+    if len(unique_keys) != 1:
+        raise ValueError(
+            f"Expected single taxonomyKey, found: {unique_keys}"
+        )
+
+    taxonomy_key = str(unique_keys[0])
+
+    # Validate required columns
+    required_columns = ["text", "level", "label", "taxonomyKey"]
+    missing_columns = [
+        col for col in required_columns if col not in appended_data.columns
+    ]
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {missing_columns}")
+
+    return {"data": appended_data, "taxonomy_key": taxonomy_key}
+
+
+def update_model_version(
+    training_metrics: Dict[str, Dict[str, Any]],
+    job_config: Dict[str, Any],
+    existing_version: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Update model version metadata after successful training.
+
+    Args:
+        training_metrics: In-memory training metrics keyed by taxonomy
+        job_config: Job configuration with jobId and taxonomyKey
+        existing_version: Existing version metadata from PartitionedDataset (may be empty)
+
+    Returns:
+        Updated version metadata dict keyed by taxonomy
+    """
+    from datetime import UTC, datetime
+
+    taxonomy_key = job_config["taxonomyKey"]
+    job_id = job_config["jobId"]
+
+    # Load existing version data or create new
+    if taxonomy_key in existing_version:
+        version_data = existing_version[taxonomy_key]
+        # Handle callable (lazy loading from PartitionedDataset)
+        if callable(version_data):
+            version_data = version_data()
+        current_version = version_data.get("currentVersion", 0)
+        training_history = version_data.get("trainingHistory", []).copy()
+    else:
+        # Try with common suffixes
+        version_data = None
+        for key, value in existing_version.items():
+            if (
+                str(key).endswith(f"/{taxonomy_key}_version")
+                or str(key).endswith(f"/{taxonomy_key}_version.json")
+                or str(key).endswith(f"{taxonomy_key}_version.json")
+            ):
+                version_data = value() if callable(value) else value
+                break
+
+        if version_data:
+            current_version = version_data.get("currentVersion", 0)
+            training_history = version_data.get("trainingHistory", []).copy()
+        else:
+            current_version = 0
+            training_history = []
+
+    # Increment version
+    new_version = current_version + 1
+
+    # Generate version string with timestamp
+    timestamp = datetime.now(UTC)
+    version_string = f"{taxonomy_key}_v{new_version}_{timestamp.strftime('%Y%m%dT%H%M%S')}"
+
+    # Calculate sample count from metrics (in-memory, no callable)
+    sample_count = 0
+    if taxonomy_key in training_metrics:
+        metrics_data = training_metrics[taxonomy_key]
+        if metrics_data:
+            first_level_metrics = list(metrics_data.values())[0]
+            sample_count = (
+                first_level_metrics.get("num_train_samples", 0)
+                + first_level_metrics.get("num_val_samples", 0)
+            )
+
+    # Append to history
+    training_history.append({
+        "version": new_version,
+        "jobId": job_id,
+        "timestamp": timestamp.isoformat(),
+        "sampleCount": sample_count,
+        "versionString": version_string,
+    })
+
+    # Create updated metadata
+    updated_metadata = {
+        "taxonomyKey": taxonomy_key,
+        "currentVersion": new_version,
+        "currentVersionString": version_string,
+        "lastTrained": timestamp.isoformat(),
+        "trainingHistory": training_history,
+    }
+
+    return {taxonomy_key: updated_metadata}
+
+
+def persist_training_data(
+    appended_data: pd.DataFrame, job_config: Dict[str, Any]
+) -> Dict[str, pd.DataFrame]:
+    """Persist appended training data to partitioned dataset.
+
+    Args:
+        appended_data: Combined training DataFrame
+        job_config: Job configuration with taxonomyKey
+
+    Returns:
+        Dictionary keyed by taxonomy for PartitionedDataset
+    """
+    taxonomy_key = job_config["taxonomyKey"]
+    return {taxonomy_key: appended_data}
+
+
+def persist_pipeline_outputs(
+    trained_models: Dict[str, Dict[int, Any]],
+    training_metrics: Dict[str, Dict[int, Dict[str, Any]]],
+    training_summary: Dict[str, Dict[str, Any]],
+    version_metadata: Dict[str, Dict[str, Any]],
+) -> tuple[
+    Dict[str, Dict[int, Any]],
+    Dict[str, Dict[int, Dict[str, Any]]],
+    Dict[str, Dict[str, Any]],
+    Dict[str, Dict[str, Any]],
+]:
+    """Persist all pipeline outputs to their respective PartitionedDatasets.
+
+    This node acts as a single persistence point for all training outputs,
+    ensuring they are saved atomically at the end of the pipeline.
+
+    Args:
+        trained_models: Dictionary of trained SetFit models by level
+        training_metrics: Dictionary of training metrics by level
+        training_summary: Dictionary of training summaries
+        version_metadata: Dictionary of model version metadata
+
+    Returns:
+        Tuple of (trained_models, training_metrics, training_summary, version_metadata)
+        for Kedro to persist to PartitionedDatasets
+    """
+    # Pass through all dictionaries - Kedro will handle persistence
+    return trained_models, training_metrics, training_summary, version_metadata

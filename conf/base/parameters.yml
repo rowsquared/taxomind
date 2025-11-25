@@ -19,7 +19,7 @@ judge:
   enabled: false  # Set to false to disable judge and use consensus/highest-score fallback
 
 setfit:
-  base_model: "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+  base_model: "sentence-transformers/all-MiniLM-L6-v2"#"sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
   epochs: 2
   batch_size: 2
   learning_rate: 2e-5
