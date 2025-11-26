@@ -195,3 +195,28 @@ training_summary_dict:
 
 updated_version_metadata_dict:
   type: MemoryDataset
+
+# Inference pipeline datasets
+api_inference_payload:
+  type: MemoryDataset
+
+inference_config:
+  type: MemoryDataset
+
+loaded_inference_config:
+  type: MemoryDataset
+
+validated_inference_payload:
+  type: MemoryDataset
+
+inference_dataframe:
+  type: MemoryDataset
+
+taxonomy_models:
+  type: MemoryDataset
+
+inference_predictions:
+  type: MemoryDataset
+
+inference_results:
+  type: MemoryDataset
