@@ -1,6 +1,16 @@
 # Kedro Data Catalog (multilingual-aware). All datasets may contain UTF-8 text in
 # any language, so downstream nodes should avoid locale assumptions.
 
+
+taxonomy_definition:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/isco_clean_taxonomy.csv
+  load_args:
+    encoding: utf-8
+    dtype:
+      code: str
+      parentCode: str
+
 taxonomy_request:
   type: json.JSONDataset
   filepath: data/01_raw/isco_taxonomy_request.json
