@@ -25,69 +25,33 @@ from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
 
 
-def load_and_prepare_training_data(labeled_csv: pd.DataFrame) -> Dict[str, Any]:
-    """Load and prepare training data from CSV.
+def load_and_prepare_training_data(labeled_csv: Dict[str, pd.DataFrame], taxonomy_key: str) -> pd.DataFrame:
+    """Load and validate training data from partitioned dataset.
 
     Args:
-        labeled_csv: DataFrame with columns: text, level, label, taxonomyKey
+        labeled_csv: PartitionedDataset containing training data
+        taxonomy_key: Key identifying which taxonomy to load (e.g., "ISCO")
 
     Returns:
-        Dictionary containing:
-            - data: Prepared DataFrame
-            - taxonomy_key: Extracted taxonomy key for folder naming
-
-    Raises:
-        ValueError: If required columns are missing or taxonomyKey is not unique
+        Validated DataFrame ready for training
     """
-    # Validate required columns
+    df = labeled_csv[taxonomy_key]()
+
+    # Validate required columns for training
     required_columns = ["text", "level", "label", "taxonomyKey"]
-    missing_columns = [col for col in required_columns if col not in labeled_csv.columns]
+    missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
 
-    # Create a copy to avoid modifying the input
-    df = labeled_csv.copy()
-
-    # Normalize data types
-    df["level"] = df["level"].astype(int)
-    df["text"] = df["text"].astype(str)
-    df["label"] = df["label"].astype(str)
-
-    # Extract and validate taxonomyKey
-    unique_keys = df["taxonomyKey"].unique()
-    if len(unique_keys) != 1:
-        raise ValueError(
-            f"taxonomyKey must be unique across dataset. Found: {unique_keys}"
-        )
-
-    taxonomy_key = str(unique_keys[0])
-
-    # Validate data quality
-    if df["text"].isna().any():
-        raise ValueError("Found missing values in 'text' column")
-    if df["label"].isna().any():
-        raise ValueError("Found missing values in 'label' column")
-
-    return {"data": df, "taxonomy_key": taxonomy_key}
+    return df
 
 
 def train_setfit_models(
-    prepared_data: Dict[str, Any], params: Dict[str, Any], job_config: Dict[str, Any] = None
+    df: pd.DataFrame, 
+    params: Dict[str, Any], 
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    """Train one SetFit model per hierarchical level.
 
-    Args:
-        prepared_data: Dictionary with 'data' (DataFrame) and 'taxonomy_key' (str)
-        params: SetFit training parameters from conf/base/parameters.yml
-        job_config: Optional job configuration (used by learning pipeline)
-
-    Returns:
-        Tuple of two dicts, each keyed by taxonomy_key for PartitionedDataset:
-            1. trained_models (PickleDataset): {taxonomy_key: {models: dict}}
-            2. training_metrics (JSONDataset): {taxonomy_key: {metrics: dict}}
-    """
-    df = prepared_data["data"]
-    taxonomy_key = prepared_data["taxonomy_key"]
+    taxonomy_key = df["taxonomyKey"].iloc[0]
 
     # Extract training parameters
     base_model = params.get("base_model", "sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
@@ -187,10 +151,55 @@ def train_setfit_models(
             training_mode = "standard"
             print(f"  Using standard training with positive and negative pairs.")
 
-            # Split into train and validation
-            train_texts, val_texts, train_labels, val_labels = train_test_split(
-                texts, labels, test_size=val_size, random_state=seed, stratify=labels
-            )
+            # Calculate actual validation size
+            num_samples = len(texts)
+            num_classes = level_df["label"].nunique()
+            min_val_size = num_classes * 2  # At least 2 samples per class for stratified split
+            min_train_size = num_classes * 2  # At least 2 samples per class in training too
+
+            # Adjust validation size if dataset is too small
+            if num_samples < (min_val_size + min_train_size):
+                # Too small for proper train/val split - use all data for training and validation
+                print(f"  ⚠️  Dataset too small ({num_samples} samples, {num_classes} classes) for train/val split.")
+                print(f"  Need at least {min_val_size + min_train_size} samples for stratified split.")
+                print(f"  Using all data for both training and validation.")
+                train_texts = texts
+                train_labels = labels
+                val_texts = texts
+                val_labels = labels
+                training_mode = "standard_no_split"
+            else:
+                # Check if val_size would create a validation set smaller than min_val_size
+                proposed_val_size = int(num_samples * val_size)
+                if proposed_val_size < min_val_size:
+                    # Adjust val_size to ensure at least min_val_size samples in validation
+                    # But also ensure it's less than 1.0 and leaves enough for training
+                    adjusted_val_size = min_val_size / num_samples
+                    max_val_size = (num_samples - min_train_size) / num_samples
+
+                    # Ensure we don't exceed max_val_size
+                    if adjusted_val_size >= max_val_size:
+                        # Can't do a proper split, use all data
+                        print(f"  ⚠️  Cannot create valid train/val split with {num_samples} samples and {num_classes} classes.")
+                        print(f"  Using all data for both training and validation.")
+                        train_texts = texts
+                        train_labels = labels
+                        val_texts = texts
+                        val_labels = labels
+                        training_mode = "standard_no_split"
+                    else:
+                        print(f"  ⚠️  Adjusting val_size from {val_size:.2f} to {adjusted_val_size:.2f} to maintain stratification.")
+                        val_size = adjusted_val_size
+
+                        # Split into train and validation
+                        train_texts, val_texts, train_labels, val_labels = train_test_split(
+                            texts, labels, test_size=val_size, random_state=seed, stratify=labels
+                        )
+                else:
+                    # Split into train and validation
+                    train_texts, val_texts, train_labels, val_labels = train_test_split(
+                        texts, labels, test_size=val_size, random_state=seed, stratify=labels
+                    )
 
             # Initialize SetFit model and move to CPU
             model = SetFitModel.from_pretrained(base_model)
@@ -256,6 +265,8 @@ def train_setfit_models(
             metrics["num_iterations"] = num_iterations
             metrics["sampling_strategy"] = sampling_strategy
             metrics["validation_note"] = "Evaluated on training set (no held-out validation)"
+        elif training_mode == "standard_no_split":
+            metrics["validation_note"] = "Dataset too small for split - evaluated on full training set"
 
         print(f"  Validation Accuracy: {accuracy:.4f}")
         print(f"  Validation F1 Score: {f1:.4f}")
@@ -629,23 +640,21 @@ def append_and_deduplicate_training_data(
 
 def prepare_training_data_from_dataframe(
     appended_data: pd.DataFrame,
-) -> Dict[str, Any]:
-    """Convert appended DataFrame to format expected by train_setfit_models.
+) -> pd.DataFrame:
+    """Validate and prepare appended DataFrame for train_setfit_models.
 
     Args:
         appended_data: Combined training DataFrame
 
     Returns:
-        Dictionary with 'data' (DataFrame) and 'taxonomy_key' (str)
+        Validated DataFrame ready for training
     """
-    # Extract taxonomy_key
+    # Validate single taxonomy
     unique_keys = appended_data["taxonomyKey"].unique()
     if len(unique_keys) != 1:
         raise ValueError(
             f"Expected single taxonomyKey, found: {unique_keys}"
         )
-
-    taxonomy_key = str(unique_keys[0])
 
     # Validate required columns
     required_columns = ["text", "level", "label", "taxonomyKey"]
@@ -655,7 +664,7 @@ def prepare_training_data_from_dataframe(
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
 
-    return {"data": appended_data, "taxonomy_key": taxonomy_key}
+    return appended_data
 
 
 def update_model_version(
@@ -758,6 +767,32 @@ def persist_training_data(
     """
     taxonomy_key = job_config["taxonomyKey"]
     return {taxonomy_key: appended_data}
+
+
+def persist_training_outputs(
+    trained_models: Dict[str, Dict[int, Any]],
+    training_metrics: Dict[str, Dict[int, Dict[str, Any]]],
+    training_summary: Dict[str, Dict[str, Any]],
+) -> tuple[
+    Dict[str, Dict[int, Any]],
+    Dict[str, Dict[int, Dict[str, Any]]],
+    Dict[str, Dict[str, Any]],
+]:
+    """Persist training outputs (without version metadata) to PartitionedDatasets.
+
+    This node acts as a single persistence point for basic training outputs.
+
+    Args:
+        trained_models: Dictionary of trained SetFit models by level
+        training_metrics: Dictionary of training metrics by level
+        training_summary: Dictionary of training summaries
+
+    Returns:
+        Tuple of (trained_models, training_metrics, training_summary)
+        for Kedro to persist to PartitionedDatasets
+    """
+    # Pass through all dictionaries - Kedro will handle persistence
+    return trained_models, training_metrics, training_summary
 
 
 def persist_pipeline_outputs(

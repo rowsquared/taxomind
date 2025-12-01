@@ -17,24 +17,38 @@ def create_pipeline(**kwargs) -> Pipeline:
         [
             node(
                 func=nodes.load_and_prepare_training_data,
-                inputs="labeled_training_csv",
+                inputs=["taxonomy_training", "params:taxonomy_key"],
                 outputs="prepared_training_data",
                 name="load_and_prepare_training_data",
             ),
             node(
                 func=nodes.train_setfit_models,
                 inputs={
-                    "prepared_data": "prepared_training_data",
+                    "df": "prepared_training_data",
                     "params": "params:setfit",
                 },
-                outputs=["trained_models", "training_metrics"],
+                outputs=["trained_models_dict", "training_metrics_dict"],
                 name="train_setfit_models",
             ),
             node(
                 func=nodes.create_training_summary,
-                inputs="training_metrics",
-                outputs="training_summary",
+                inputs="training_metrics_dict",
+                outputs="training_summary_dict",
                 name="create_training_summary",
+            ),
+            node(
+                func=nodes.persist_training_outputs,
+                inputs={
+                    "trained_models": "trained_models_dict",
+                    "training_metrics": "training_metrics_dict",
+                    "training_summary": "training_summary_dict",
+                },
+                outputs=[
+                    "trained_models",
+                    "training_metrics",
+                    "training_summary",
+                ],
+                name="persist_outputs",
             ),
         ]
     )
@@ -138,7 +152,7 @@ def create_learning_pipeline(**kwargs) -> Pipeline:
             node(
                 func=nodes.train_setfit_models,
                 inputs={
-                    "prepared_data": "prepared_training_data",
+                    "df": "prepared_training_data",
                     "params": "params:setfit",
                 },
                 outputs=["trained_models_dict", "training_metrics_dict"],
