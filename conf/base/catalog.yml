@@ -2,21 +2,67 @@
 # any language, so downstream nodes should avoid locale assumptions.
 
 
-taxonomy_definition:
+isco_taxonomy_definition:
+  type: pandas.ExcelDataset
+  filepath: data/01_raw/taxonomies/ISCO-08 EN Structure and definitions.xlsx
+  load_args:
+    dtype:
+      ISCO 08 Code: str
+  save_args:
+    sheet_name: ISCO-08 EN Struct and defin
+
+
+isic_taxonomy_definition:
   type: pandas.CSVDataset
-  filepath: data/01_raw/isco_clean_taxonomy.csv
+  filepath: data/01_raw/taxonomies/ISICRev4 NT input.csv
   load_args:
     encoding: utf-8
     dtype:
-      code: str
-      parentCode: str
+      Code: str
+
+
+training_data_raw:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/training_data.csv
+  load_args:
+    encoding: utf-8
+    dtype:
+      isco_level4: str
+      isic_level4: str
+
+taxonomy_definition:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/taxonomies
+  dataset:
+    type: pandas.CSVDataset
+    load_args:
+      dtype:
+        code: str
+        parentCode: str
+  filename_suffix: .csv
+
 
 taxonomy_request:
-  type: json.JSONDataset
-  filepath: data/01_raw/isco_taxonomy_request.json
-  save_args:
-    indent: 2
-    ensure_ascii: false
+  type: partitions.PartitionedDataset
+  path: data/03_primary/taxonomies/requests
+  dataset: json.JSONDataset
+  filename_suffix: .json
+
+
+taxonomy_training:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/training/taxonomies
+  dataset: pandas.CSVDataset
+  filename_suffix: .csv
+
+
+training_sentences:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/training
+  dataset: json.JSONDataset
+  filename_suffix: .json
+
+  
 
 taxonomy_table:
   type: MemoryDataset
@@ -32,7 +78,7 @@ taxonomy_enriched:
 
 taxonomy_embedded:
   type: partitions.PartitionedDataset
-  path: data/03_primary/taxonomies
+  path: data/03_primary/taxonomies/embedded
   dataset: pandas.ParquetDataset
   filename_suffix: .parquet
 
@@ -41,7 +87,7 @@ taxonomy_full_paths:
 
 taxonomy_full_path_embedded:
   type: partitions.PartitionedDataset
-  path: data/03_primary/flat_taxonomies
+  path: data/03_primary/taxonomies/embedded/flat_taxonomies
   dataset: pandas.ParquetDataset
   filename_suffix: .parquet
 
@@ -229,4 +275,11 @@ inference_predictions:
   type: MemoryDataset
 
 inference_results:
+  type: MemoryDataset
+
+# Ensemble pipeline datasets
+ensemble_predictions:
+  type: MemoryDataset
+
+ensemble_results:
   type: MemoryDataset
