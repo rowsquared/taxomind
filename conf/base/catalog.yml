@@ -39,10 +39,20 @@ taxonomy_definition:
       dtype:
         code: str
         parentCode: str
+        definition: str
+        examples: str
+    save_args:
+      encoding: utf-8
+      index: false
+      quoting: 1      # csv.QUOTE_ALL
+      quotechar: '"' 
   filename_suffix: .csv
 
 
 taxonomy_request:
+  type: MemoryDataset
+
+taxonomy_request_files:
   type: partitions.PartitionedDataset
   path: data/03_primary/taxonomies/requests
   dataset: json.JSONDataset
@@ -201,6 +211,12 @@ persisted_training_data:
     type: pandas.CSVDataset
     load_args:
       encoding: utf-8
+      dtype:
+        text: str
+        label: str
+        taxonomyKey: str
+        sentenceId: str
+        level: int
     save_args:
       encoding: utf-8
       index: false

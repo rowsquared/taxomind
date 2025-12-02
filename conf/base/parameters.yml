@@ -1,9 +1,8 @@
 embedding:
-  model_name: "BAAI/bge-m3"
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"#"BAAI/bge-m3"
 
 zero_shot:
-  sample_text: "Job_description: vegetable farmer"
-  model_name: "BAAI/bge-m3"
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"#"BAAI/bge-m3"
   topdown_k: 1
   bottomup_k: 1
   flat_k: 1
@@ -12,6 +11,17 @@ zero_shot:
   # Improvement configurations
   parent_weight: 0.3  # Weight for parent context in bottom-up (0.0-1.0)
   min_confidence: 0.4  # Minimum confidence threshold for predictions
+
+  # Top-Down with Confidence Gating parameters (adaptive approach)
+  min_confidence_level1: 0.05  # Minimum confidence to accept at level 1 (ensures we match something)
+  stop_on_decrease: true  # Stop when confidence decreases from previous level (adaptive stopping)
+
+  # Bottom-Up Path Aggregation parameters
+  aggregation_method: "mean_top_k"  # Options: "max", "mean", "mean_top_k"
+  top_k_children: 3  # Number of top children to consider for mean_top_k aggregation
+
+  # Disagreement Detection parameters
+  disagreement_threshold: 3  # Minimum number of different parents to consider as disagreement
 
 
 judge:
@@ -25,8 +35,32 @@ setfit:
   learning_rate: 2e-5
   val_size: 0.1
   seed: 42
-  output_path: "data/07_model_output"
-  use_only_negative_pairs: true  # For classes with single samples (enables contrastive learning with negative pairs only)
+  use_only_negative_pairs: false  # For classes with single samples (enables contrastive learning with negative pairs only)
   num_iterations: 2  # Number of text pairs to generate per example in negative-only mode
   sampling_strategy: "unique"  # Sampling strategy for negative-only mode: "unique" or "oversampling"
-  level_to_train: null  # Optional: Train only a specific level (e.g., 1, 2, 3). Set to null to train all levels. Note: Training always uses CPU to avoid memory issues
+  level_to_train: null  # Optional: Train only a specific level (e.g., 1, 2, 3). Set to null to train all levels. Can now train all levels with sampling!
+  max_samples_per_class: 5  # Maximum samples per class per level (for few-shot learning). Set to null for no limit. Recommended: 5-20 for SetFit.
+
+ensemble:
+  # Ensemble classification parameters (4-way: 2 zero-shot + 2 SetFit)
+  # Uses adaptive trust that evolves with incremental learning
+
+  # Zero-shot parameters (inherited from zero_shot config)
+  top_k: 5
+  disagreement_threshold: 3
+  min_confidence_level1: 0.05
+  stop_on_decrease: true
+
+  # Trust evolution parameters
+  definition_samples_baseline: 0  # Number of samples from taxonomy definitions (set at runtime)
+  annotation_saturation: 300  # Number of annotations where SetFit trust saturates
+  min_accuracy_threshold: 0.6  # Minimum accuracy for SetFit to get trust boost
+  max_setfit_trust: 0.9  # Maximum trust for SetFit (always keep some zero-shot influence)
+
+  # Agreement and review parameters
+  low_confidence_threshold: 0.5  # Flag for review if confidence < threshold
+  low_agreement_threshold: 0.4  # Flag for review if agreement < threshold
+  majority_boost_level: 1.2  # Boost factor for predictions agreeing on level (20%)
+  majority_boost_label: 1.1  # Boost factor for predictions agreeing on label (10%)
+
+taxonomy_key: "ISCO"  # Default taxonomy to use

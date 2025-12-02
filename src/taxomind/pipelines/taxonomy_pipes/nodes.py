@@ -85,7 +85,6 @@ def add_unknowns(taxonomy: pd.DataFrame) -> pd.DataFrame:
     return combined
 
 
-
 def enrich_labels(taxonomy: pd.DataFrame) -> pd.DataFrame:
     """Combine labels, definitions, and examples into enriched multilingual text."""
 
@@ -180,52 +179,5 @@ def embed_full_paths(taxonomy: pd.DataFrame, model_name: str) -> Dict[str, pd.Da
     return {taxonomy_key: taxonomy}
 
 
-def transform_taxonomy_to_training_format(taxonomy_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Transform taxonomy definition into training data format.
 
-    Creates rows with columns: text, label, label_code, level
-    - One row for each definition
-    - Additional rows for each example (split by newline)
-
-    Args:
-        taxonomy_df: DataFrame with columns: id, code, level, label, definition, examples, parentCode, isLeaf
-
-    Returns:
-        DataFrame with columns: text, label, label_code, level
-    """
-    records = []
-
-    for _, row in taxonomy_df.iterrows():
-        label = row.get("label")
-        label_code = row.get("code")
-        level = row.get("level")
-        definition = row.get("definition")
-        examples = row.get("examples")
-
-        # Add definition row if definition is not empty
-        if definition and pd.notna(definition) and str(definition).strip():
-            records.append({
-                "text": str(definition).strip(),
-                "label": label,
-                "label_code": label_code,
-                "level": level
-            })
-
-        # Add example rows if examples is not empty
-        if examples and pd.notna(examples) and str(examples).strip():
-            # Split by newline and create a row for each non-empty example
-            example_lines = str(examples).split("\n")
-            for example in example_lines:
-                example_stripped = example.strip()
-                if example_stripped:
-                    records.append({
-                        "text": example_stripped,
-                        "label": label,
-                        "label_code": label_code,
-                        "level": level
-                    })
-
-    result_df = pd.DataFrame(records)
-    return result_df
 
