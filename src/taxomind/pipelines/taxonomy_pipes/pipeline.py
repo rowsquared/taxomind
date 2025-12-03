@@ -52,6 +52,21 @@ def create_pipeline(**kwargs) -> Pipeline:
                 outputs="taxonomy_full_path_embedded",
                 name="embed_full_paths",
             ),
+            node(
+                func=nodes.build_flat_hierarchical_labels,
+                inputs="taxonomy_enriched",
+                outputs="taxonomy_flat_hierarchical",
+                name="build_flat_hierarchical_labels",
+            ),
+            node(
+                func=nodes.embed_flat_hierarchical_taxonomy,
+                inputs={
+                    "taxonomy": "taxonomy_flat_hierarchical",
+                    "model_name": "params:embedding.model_name",
+                },
+                outputs="taxonomy_flat_hierarchical_embedded",
+                name="embed_flat_hierarchical_taxonomy",
+            ),
 
         ]
     )

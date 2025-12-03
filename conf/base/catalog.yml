@@ -101,6 +101,15 @@ taxonomy_full_path_embedded:
   dataset: pandas.ParquetDataset
   filename_suffix: .parquet
 
+taxonomy_flat_hierarchical:
+  type: MemoryDataset
+
+taxonomy_flat_hierarchical_embedded:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/taxonomies/embedded/hierarchical
+  dataset: pandas.ParquetDataset
+  filename_suffix: .parquet
+
 isco_test_sentences:
   type: json.JSONDataset
   filepath: data/01_raw/isco_test_sentences.json

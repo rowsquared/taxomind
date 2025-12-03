@@ -2747,3 +2747,143 @@ def compute_disagreement_detection_routes(
             }
         )
     return results
+
+
+def hierarchical_flat_classification(
+    input_embedding: List[float],
+    taxonomy_hierarchical_embedded: pd.DataFrame,
+    top_k: int = 5,
+) -> Dict[str, Any]:
+    """
+    Classify using hierarchical embeddings (labels with parent chain).
+
+    This approach uses embeddings of hierarchical labels (e.g., "Managers,
+    Chief Executives, Legislators") which encode the full context of each
+    node's position in the taxonomy hierarchy.
+
+    Unlike standard flat classification which only uses individual label embeddings,
+    this leverages the full parent-to-child context embedded in a single vector.
+
+    Args:
+        input_embedding: Input text embedding vector
+        taxonomy_hierarchical_embedded: Taxonomy DataFrame with 'hierarchical_embedding' column
+        top_k: Number of top candidates to return
+
+    Returns:
+        Dict with:
+            - best_leaf: Best classification (may be at any level)
+            - best_leaf_score: Confidence score
+            - best_route: Full path to best classification
+            - topk: Top-k alternatives with scores
+            - classification_level: Level of the best match
+    """
+    # Check if hierarchical_embedding column exists
+    if "hierarchical_embedding" not in taxonomy_hierarchical_embedded.columns:
+        raise ValueError(
+            "hierarchical_embedding column not found. "
+            "Ensure taxonomy was processed with build_flat_hierarchical_labels "
+            "and embed_flat_hierarchical_taxonomy."
+        )
+
+    # Score all nodes using hierarchical embeddings
+    scored_nodes = []
+
+    for _, row in taxonomy_hierarchical_embedded.iterrows():
+        hierarchical_embedding = row.get("hierarchical_embedding")
+
+        if hierarchical_embedding is None or not isinstance(
+            hierarchical_embedding, (list, np.ndarray)
+        ):
+            continue
+
+        # Calculate cosine similarity with hierarchical embedding
+        similarity = float(
+            np.dot(input_embedding, hierarchical_embedding)
+            / (
+                np.linalg.norm(input_embedding)
+                * np.linalg.norm(hierarchical_embedding)
+            )
+        )
+
+        node_dict = taxonomy_utils.row_to_candidate(row)
+        node_dict["score"] = similarity
+        node_dict["hierarchical_label"] = row.get("hierarchical_label", "")
+        scored_nodes.append(node_dict)
+
+    # Sort by score
+    scored_nodes.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+
+    # Get top-k candidates
+    topk_candidates = scored_nodes[:top_k]
+
+    # Best match
+    best_node = topk_candidates[0] if topk_candidates else None
+    best_score = float(best_node.get("score", 0.0)) if best_node else None
+    classification_level = best_node.get("level") if best_node else None
+
+    # Build path for best node
+    best_route = []
+    if best_node:
+        parent_codes = taxonomy_utils.get_parent_chain(
+            taxonomy_hierarchical_embedded, best_node.get("code")
+        )
+        path_nodes: List[Dict[str, Any]] = []
+
+        for code in parent_codes:
+            node_row = taxonomy_hierarchical_embedded[
+                taxonomy_hierarchical_embedded["code"] == code
+            ]
+            if not node_row.empty:
+                path_nodes.append(taxonomy_utils.row_to_candidate(node_row.iloc[0]))
+
+        best_node_copy = dict(best_node)
+        if "path_nodes" in best_node_copy:
+            del best_node_copy["path_nodes"]
+        path_nodes.append(best_node_copy)
+        best_node["path_nodes"] = path_nodes
+
+        # Build simple route annotations without rescoring
+        best_route = _build_route_annotations(path_nodes)
+
+    # Attach path_nodes to all top-k candidates
+    for candidate in topk_candidates:
+        if candidate and not candidate.get("path_nodes"):
+            parent_codes = taxonomy_utils.get_parent_chain(
+                taxonomy_hierarchical_embedded, candidate.get("code")
+            )
+            path_nodes: List[Dict[str, Any]] = []
+            for code in parent_codes:
+                node_row = taxonomy_hierarchical_embedded[
+                    taxonomy_hierarchical_embedded["code"] == code
+                ]
+                if not node_row.empty:
+                    path_nodes.append(
+                        taxonomy_utils.row_to_candidate(node_row.iloc[0])
+                    )
+            candidate_copy = dict(candidate)
+            if "path_nodes" in candidate_copy:
+                del candidate_copy["path_nodes"]
+            path_nodes.append(candidate_copy)
+            candidate["path_nodes"] = path_nodes
+
+    # Build simple topk routes
+    topk_routes: List[Dict[str, Any]] = []
+    for candidate in topk_candidates:
+        path_nodes = candidate.get("path_nodes", [])
+        leaf_node = dict(candidate)
+        if "path_nodes" in leaf_node:
+            del leaf_node["path_nodes"]
+
+        topk_routes.append({
+            "leaf": leaf_node,
+            "score": float(candidate.get("score", 0.0)),
+            "route": _build_route_annotations(path_nodes),
+        })
+
+    return {
+        "best_leaf": best_node,
+        "best_leaf_score": best_score,
+        "classification_level": classification_level,
+        "best_route": best_route,
+        "topk": topk_routes,
+    }

@@ -179,5 +179,93 @@ def embed_full_paths(taxonomy: pd.DataFrame, model_name: str) -> Dict[str, pd.Da
     return {taxonomy_key: taxonomy}
 
 
+def build_flat_hierarchical_labels(taxonomy: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build flat hierarchical labels by concatenating each node's label with all parent labels.
+
+    For example, for ISCO level 3 "Legislators and Senior Officials":
+    - Gets level 2 parent: "Chief Executives, Senior Officials and Legislators"
+    - Gets level 1 grandparent: "Managers"
+    - Creates: "Managers, Chief Executives, Senior Officials and Legislators, Legislators and Senior Officials"
+
+    Args:
+        taxonomy: DataFrame with columns including code, level, label, parentCode, taxonomyKey
+
+    Returns:
+        DataFrame with added column 'hierarchical_label' containing comma-separated parent chain
+    """
+    taxonomy = taxonomy.copy()
+
+    # Build a code-to-label lookup for fast access
+    code_to_label = dict(zip(taxonomy["code"], taxonomy["label"]))
+
+    hierarchical_labels = []
+
+    for _, row in taxonomy.iterrows():
+        code = row["code"]
+        level = row["level"]
+        current_label = row["label"]
+
+        # Get all parent codes from root to current node
+        parent_codes = taxonomy_utils.get_parent_chain(taxonomy, code)
+
+        # Build the hierarchical label by combining parent labels with current label
+        label_parts = []
+
+        # Add parent labels in order (from root to immediate parent)
+        for parent_code in parent_codes:
+            if parent_code in code_to_label:
+                label_parts.append(code_to_label[parent_code])
+
+        # Add current label
+        label_parts.append(current_label)
+
+        # Join with comma separator
+        hierarchical_label = ", ".join(label_parts)
+        hierarchical_labels.append(hierarchical_label)
+
+    taxonomy["hierarchical_label"] = hierarchical_labels
+
+    return taxonomy
+
+
+def embed_flat_hierarchical_taxonomy(taxonomy: pd.DataFrame, model_name: str) -> Dict[str, pd.DataFrame]:
+    """
+    Embed the hierarchical labels (labels with parent chain) for each taxonomy node.
+
+    This creates embeddings based on the full hierarchical context of each label,
+    which can improve classification by providing more context about where in the
+    hierarchy each node sits.
+
+    Args:
+        taxonomy: DataFrame with 'hierarchical_label' column (from build_flat_hierarchical_labels)
+        model_name: Name of the embedding model to use
+
+    Returns:
+        Dictionary mapping taxonomy key to DataFrame with 'hierarchical_embedding' column
+    """
+    if taxonomy.empty:
+        raise ValueError("Cannot embed an empty taxonomy DataFrame")
+
+    taxonomy = taxonomy.copy()
+    taxonomy_key = taxonomy["taxonomyKey"].iloc[0]
+
+    if taxonomy_key is None or pd.isna(taxonomy_key):
+        raise ValueError("taxonomyKey is None in the taxonomy DataFrame")
+
+    # Check if hierarchical_label column exists
+    if "hierarchical_label" not in taxonomy.columns:
+        raise ValueError("hierarchical_label column not found. Run build_flat_hierarchical_labels first.")
+
+    # Embed the hierarchical labels
+    texts = taxonomy["hierarchical_label"].fillna("").tolist()
+    embeddings = embedding_utils.embed_texts(texts, model_name=model_name)
+
+    taxonomy["hierarchical_embedding"] = embeddings
+    taxonomy["hierarchical_embedding_model_name"] = model_name
+
+    return {taxonomy_key: taxonomy}
+
+
 
 
