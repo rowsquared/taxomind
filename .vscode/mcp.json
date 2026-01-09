@@ -1,0 +1,17 @@
+{
+	"servers": {
+		"Kedro": {
+			"command": "uvx",
+			"args": [
+				"kedro-mcp@latest"
+			],
+			"env": {
+				"FASTMCP_LOG_LEVEL": "ERROR"
+			},
+			"disabled": false,
+			"autoApprove": [],
+			"type": "stdio"
+		}
+	},
+	"inputs": []
+}
