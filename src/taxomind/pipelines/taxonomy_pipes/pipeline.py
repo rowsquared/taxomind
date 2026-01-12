@@ -16,7 +16,6 @@ def create_pipeline(**kwargs) -> Pipeline:
                 outputs="taxonomy_validated",
                 name="load_taxonomy",
             ),
-            
             node(
                 func=nodes.embed_taxonomy,
                 inputs={

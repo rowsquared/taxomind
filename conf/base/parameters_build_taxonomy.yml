@@ -1,0 +1,12 @@
+# Build Taxonomy Pipeline Parameters
+#
+# This pipeline uses parameters from the main parameters.yml file:
+# - taxonomy_key: Which taxonomy to build (e.g., "ISCO")
+# - model_name: Embedding model to use (e.g., "BAAI/bge-m3")
+#
+# The pipeline creates a numpy-based embedding index suitable for
+# taxonomies with <1k nodes where exact cosine similarity search
+# is fast enough (~0.1ms for 619 ISCO nodes).
+#
+# No additional pipeline-specific parameters are currently needed.
+# The zero_shot parameters in parameters.yml are for inference only.

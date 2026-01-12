@@ -9,131 +9,8 @@ UNKNOWN_DEFINITION = "This category reflects the inability to determine the appr
 UNKNOWN_EXAMPLES = ""
 
 
-def compose_text(row: pd.Series) -> str:
-    """Concatenate label, definition, and examples for embeddings."""
-
-    label = row.get("label", "")
-    definition = row.get("definition", "")
-    examples = row.get("examples", "")
-    segments: List[str] = []
-    segments.append(label)
-    segments.append(f"Definition: {definition}")
-    segments.append(f"Examples: {examples}")
-
-    return "\n".join(segments)
-
-
-def get_level_nodes(
-    taxonomy: pd.DataFrame, level: int, parent_code: str | None
-) -> pd.DataFrame:
-    """Return nodes for a given level filtered by parent code."""
-
-    # Normalize parent_code to match taxonomy's parentCode format (None -> "__root__")
-    normalized_parent = normalize_parent(parent_code)
-    mask = (taxonomy["level"] == level) & (taxonomy["parentCode"] == normalized_parent)
-
-    return taxonomy.loc[mask].copy()
-
-
-def get_bottom_up_candidates(
-    taxonomy: pd.DataFrame, route: Sequence[dict]
-) -> pd.DataFrame:
-    """Return candidate nodes for validation (leaf + siblings)."""
-
-    if not route:
-        return taxonomy.iloc[0:0].copy()
-
-    target = route[-1]
-    level = int(target.get("level", 0))
-    parent_code = target.get("parentCode")
-    code = target.get("code")
-
-    siblings = get_level_nodes(taxonomy, level, parent_code)
-    current = taxonomy[taxonomy["code"] == code]
-    candidates = pd.concat([current, siblings], ignore_index=True)
-    return candidates.drop_duplicates(subset="code")
-
-
-def filter_by_codes(taxonomy: pd.DataFrame, codes: Iterable[str]) -> pd.DataFrame:
-    """Convenience helper for selecting taxonomy entries by code."""
-
-    code_list = list(codes)
-    if not code_list:
-        return taxonomy.iloc[0:0].copy()
-    return taxonomy[taxonomy["code"].isin(code_list)].copy()
-
-
-def build_taxonomy_context(taxonomy: pd.DataFrame, candidates: Sequence[dict]) -> str:
-    """Prepare multilingual context strings for judge prompts."""
-
-    codes = [candidate.get("code") for candidate in candidates if candidate.get("code")]
-    subset = filter_by_codes(taxonomy, codes)
-    lines: List[str] = []
-    for _, row in subset.iterrows():
-        definition = row.get("definition") or ""
-        examples = row.get("examples") or ""
-        snippet = f"{row['code']} | {row['label']}\nDefinition: {definition}\nExample: {examples}"
-        lines.append(snippet.strip())
-    return "\n\n".join(lines)
-
-
-def row_to_candidate(row: pd.Series, score: float | None = None) -> dict:
-    """Convert a taxonomy row into the candidate dictionary schema."""
-
-    candidate = {
-        "code": row.get("code"),
-        "label": row.get("label"),
-        "level": int(row.get("level", 0)),
-        "parentCode": row.get("parentCode"),
-        "isLeaf": bool(row.get("isLeaf")),
-    }
-    if score is not None:
-        candidate["score"] = float(score)
-    return candidate
-
-
-def routes_match(route_a: Sequence[dict], route_b: Sequence[dict]) -> bool:
-    """Compare two routes by their node codes."""
-
-    if not route_a or not route_b:
-        return False
-    if len(route_a) != len(route_b):
-        return False
-    return all(a.get("code") == b.get("code") for a, b in zip(route_a, route_b))
-
-
-def same_branch(code_a: str | None, code_b: str | None) -> bool:
-    """Return True when the provided codes belong to the same hierarchical branch."""
-
-    if not code_a or not code_b:
-        return False
-    return code_a.startswith(code_b) or code_b.startswith(code_a)
-
-
-def compose_path_text(path_nodes: Sequence[dict]) -> str:
-    """Concatenate the textual content of every node in a path."""
-
-    segments: List[str] = []
-    for idx, node in enumerate(path_nodes, 1):
-        segment = compose_text(node)
-        segments.append(segment)
-    return "\n\n".join(segment for segment in segments if segment)
-
-
-def row_to_node_dict(row: pd.Series) -> dict:
-    return {
-        "code": row.get("code"),
-        "label": row.get("label"),
-        "definition": row.get("definition"),
-        "examples": row.get("examples"),
-        "level": int(row.get("level", 0)),
-        "parentCode": row.get("parentCode"),
-        "isLeaf": bool(row.get("isLeaf")),
-    }
-
-
 def normalize_text(value: Any) -> str:
-    if value is None:
+    if pd.isna(value):
         return ""
     text = str(value).strip()
     return text
@@ -155,10 +32,11 @@ def unknown_code(level: int) -> str:
         return ""
     return "-" + ("9" * level)
 
-
-def normalize_parent(value: object) -> str:
-    code = normalize_code(value)
-    return str(code) if code is not None and not pd.isna(code) else "__root__"
+def normalize_parent(parent_code: object) -> str:
+    """Normalize parent code to handle missing or invalid values."""
+    if pd.isna(parent_code) or parent_code in ["", "NA", "N/A"]:
+        return "__root__"
+    return normalize_code(parent_code)
 
 
 def normalize_code(value: Any) -> str | None:
@@ -399,7 +277,6 @@ def jsonize_taxonomy(df_processed, taxonomy_key, level_names):
         },
     }
     return taxonomy_request
-
 
 def pad_taxonomy_codes(
     df: pd.DataFrame,
@@ -654,3 +531,38 @@ def enrich_with_taxonomy_hierarchy(
         )
 
     return result_df
+
+def get_partition_by_key(partition_map: dict, taxonomy_key: str) -> pd.DataFrame:
+    """
+    Get partition data from a PartitionedDataset by taxonomy key.
+
+    Kedro's PartitionedDataset.load() returns a dict where keys are partition IDs
+    and values are callable functions that return the actual data.
+
+    Args:
+        partition_map: Dictionary returned by catalog.load('partitioned_dataset_name')
+                      Format: {partition_id: callable_that_returns_data}
+        taxonomy_key: The partition key to retrieve (e.g., "ISIC", "ISCO")
+
+    Returns:
+        DataFrame for the specified partition
+
+    Raises:
+        ValueError: If the taxonomy_key is not found in the partition_map
+
+    Example:
+        >>> partition_map = catalog.load('taxonomy_definition')
+        >>> isic_df = get_partition_by_key(partition_map, 'ISIC')
+        >>> isco_df = get_partition_by_key(partition_map, 'ISCO')
+    """
+    if taxonomy_key not in partition_map:
+        available_keys = list(partition_map.keys())
+        raise ValueError(
+            f"Taxonomy key '{taxonomy_key}' not found in partitions. "
+            f"Available keys: {available_keys}"
+        )
+
+    # Call the callable to get the actual DataFrame
+    partition_callable = partition_map.get(taxonomy_key)
+    return partition_callable()
+

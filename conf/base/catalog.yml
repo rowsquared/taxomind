@@ -86,6 +86,30 @@ taxonomy_validated:
 taxonomy_enriched:
   type: MemoryDataset
 
+# Build taxonomy pipeline intermediate datasets
+taxonomy_raw:
+  type: MemoryDataset
+
+taxonomy_normalized:
+  type: MemoryDataset
+
+taxonomy_adjacency:
+  type: MemoryDataset
+
+taxonomy_embeddings:
+  type: MemoryDataset
+
+# Build taxonomy pipeline output (numpy-based index)
+taxonomy_index:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/taxonomies/index
+  dataset: pandas.ParquetDataset
+  filename_suffix: .parquet
+
+# Legacy datasets (multi-view embeddings - deprecated)
+taxonomy_embedded_views:
+  type: MemoryDataset
+
 taxonomy_embedded:
   type: partitions.PartitionedDataset
   path: data/03_primary/taxonomies/embedded
