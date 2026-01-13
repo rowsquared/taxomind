@@ -532,6 +532,46 @@ def enrich_with_taxonomy_hierarchy(
 
     return result_df
 
+
+def get_children(df: pd.DataFrame, code: str) -> List[str]:
+    """
+    Get immediate children of a node.
+
+    Args:
+        df: Taxonomy DataFrame with 'code' and 'parentCode' columns
+        code: Parent code to find children for
+
+    Returns:
+        List of child codes (may be empty if node is a leaf)
+
+    Example:
+        >>> children = get_children(taxonomy_df, "25")
+        >>> print(children)  # ['251', '252', '253']
+    """
+    children = df[df["parentCode"] == code]["code"].tolist()
+    return children
+
+
+def get_roots(df: pd.DataFrame) -> List[str]:
+    """
+    Find all root nodes (nodes with no parent).
+
+    A root is identified by parentCode == "__root__" (normalized empty/None).
+
+    Args:
+        df: Taxonomy DataFrame with 'code' and 'parentCode' columns
+
+    Returns:
+        List of root codes
+
+    Example:
+        >>> roots = get_roots(taxonomy_df)
+        >>> print(roots)  # ['1', '2', '3', ...]
+    """
+    roots = df[df["parentCode"] == "__root__"]["code"].tolist()
+    return roots
+
+
 def get_partition_by_key(partition_map: dict, taxonomy_key: str) -> pd.DataFrame:
     """
     Get partition data from a PartitionedDataset by taxonomy key.

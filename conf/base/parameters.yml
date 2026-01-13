@@ -1,6 +1,6 @@
 taxonomy_key: "ISCO"  # Default taxonomy to use
 
-model_name: "BAAI/bge-m3"
+model_name: "nomic-ai/nomic-embed-text-v2-moe"#"BAAI/bge-m3"
 
 zero_shot:
   topdown_k: 1

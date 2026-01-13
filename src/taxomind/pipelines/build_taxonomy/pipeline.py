@@ -14,15 +14,18 @@ def create_pipeline(**kwargs) -> Pipeline:
     """
     Create the build_taxonomy pipeline (from CSV files).
 
-    This pipeline:
+    This pipeline implements Module 1 - Taxonomy Preparation:
     1. Loads taxonomy from partitioned CSV dataset by key
     2. Normalizes text fields (code, labels, definitions, examples)
-    3. Builds taxonomy adjacency graph (parent-child relationships)
-    4. Creates numpy embedding matrix for label-based similarity search
-    5. Saves taxonomy index with embeddings and metadata
+    3. Loads embedding model once for reuse
+    4. Creates label embeddings (primary anchor)
+    5. Creates definition embeddings (secondary semantic view)
+    6. Creates examples embeddings (tertiary semantic view, optional)
+    7. Adds embedding metadata (model name, dimension)
+    8. Saves taxonomy index with multi-view embeddings
 
     Returns:
-        Pipeline with 5 nodes for taxonomy index building
+        Pipeline with 7 nodes for multi-view taxonomy index building
     """
     return pipeline(
         [
@@ -39,16 +42,34 @@ def create_pipeline(**kwargs) -> Pipeline:
                 name="normalize_prototype_views",
             ),
             node(
-                func=nodes.build_taxonomy_adjacency,
-                inputs="taxonomy_normalized",
-                outputs="taxonomy_adjacency",
-                name="build_taxonomy_adjacency",
+                func=nodes.load_embedding_model,
+                inputs="params:model_name",
+                outputs="embedding_model",
+                name="load_embedding_model",
             ),
             node(
-                func=nodes.build_numpy_embeddings,
-                inputs=["taxonomy_adjacency", "params:model_name"],
+                func=nodes.build_label_embeddings,
+                inputs=["taxonomy_normalized", "embedding_model"],
+                outputs="taxonomy_with_label_embeddings",
+                name="build_label_embeddings",
+            ),
+            node(
+                func=nodes.build_definition_embeddings,
+                inputs=["taxonomy_with_label_embeddings", "embedding_model"],
+                outputs="taxonomy_with_definition_embeddings",
+                name="build_definition_embeddings",
+            ),
+            node(
+                func=nodes.build_examples_embeddings,
+                inputs=["taxonomy_with_definition_embeddings", "embedding_model"],
+                outputs="taxonomy_with_examples_embeddings",
+                name="build_examples_embeddings",
+            ),
+            node(
+                func=nodes.add_embedding_metadata,
+                inputs=["taxonomy_with_examples_embeddings", "params:model_name"],
                 outputs="taxonomy_embeddings",
-                name="build_numpy_embeddings",
+                name="add_embedding_metadata",
             ),
             node(
                 func=nodes.save_taxonomy_index,
@@ -64,16 +85,19 @@ def create_pipeline_from_request(**kwargs) -> Pipeline:
     """
     Create the build_taxonomy_from_request pipeline (from JSON files).
 
-    This pipeline:
+    This pipeline implements Module 1 - Taxonomy Preparation:
     1. Loads taxonomy from JSON request files by key
     2. Parses JSON structure and converts to DataFrame
     3. Normalizes text fields (code, labels, definitions, examples)
-    4. Builds taxonomy adjacency graph (parent-child relationships)
-    5. Creates numpy embedding matrix for label-based similarity search
-    6. Saves taxonomy index with embeddings and metadata
+    4. Loads embedding model once for reuse
+    5. Creates label embeddings (primary anchor)
+    6. Creates definition embeddings (secondary semantic view)
+    7. Creates examples embeddings (tertiary semantic view, optional)
+    8. Adds embedding metadata (model name, dimension)
+    9. Saves taxonomy index with multi-view embeddings
 
     Returns:
-        Pipeline with 5 nodes for taxonomy index building from JSON
+        Pipeline with 7 nodes for multi-view taxonomy index building from JSON
     """
     return pipeline(
         [
@@ -90,16 +114,34 @@ def create_pipeline_from_request(**kwargs) -> Pipeline:
                 name="normalize_prototype_views",
             ),
             node(
-                func=nodes.build_taxonomy_adjacency,
-                inputs="taxonomy_normalized",
-                outputs="taxonomy_adjacency",
-                name="build_taxonomy_adjacency",
+                func=nodes.load_embedding_model,
+                inputs="params:model_name",
+                outputs="embedding_model",
+                name="load_embedding_model",
             ),
             node(
-                func=nodes.build_numpy_embeddings,
-                inputs=["taxonomy_adjacency", "params:model_name"],
+                func=nodes.build_label_embeddings,
+                inputs=["taxonomy_normalized", "embedding_model"],
+                outputs="taxonomy_with_label_embeddings",
+                name="build_label_embeddings",
+            ),
+            node(
+                func=nodes.build_definition_embeddings,
+                inputs=["taxonomy_with_label_embeddings", "embedding_model"],
+                outputs="taxonomy_with_definition_embeddings",
+                name="build_definition_embeddings",
+            ),
+            node(
+                func=nodes.build_examples_embeddings,
+                inputs=["taxonomy_with_definition_embeddings", "embedding_model"],
+                outputs="taxonomy_with_examples_embeddings",
+                name="build_examples_embeddings",
+            ),
+            node(
+                func=nodes.add_embedding_metadata,
+                inputs=["taxonomy_with_examples_embeddings", "params:model_name"],
                 outputs="taxonomy_embeddings",
-                name="build_numpy_embeddings",
+                name="add_embedding_metadata",
             ),
             node(
                 func=nodes.save_taxonomy_index,

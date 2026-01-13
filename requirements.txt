@@ -14,3 +14,4 @@ transformers
 pyyaml
 requests
 ollama
+einops

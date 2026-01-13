@@ -2,6 +2,21 @@
 # any language, so downstream nodes should avoid locale assumptions.
 
 
+classifai_validation_data:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/taxonomies/validation_data/export-2026-01-12T16_07_07.162Z.csv
+  load_args:
+    encoding: utf-8
+    dtype:
+      ISCO_1: str
+      ISCO_2: str
+      ISCO_3: str
+      ISCO_4: str
+      ISIC_1: str
+      ISIC_2: str
+      ISIC_3: str
+      ISIC_4: str
+
 isco_taxonomy_definition:
   type: pandas.ExcelDataset
   filepath: data/01_raw/taxonomies/ISCO-08 EN Structure and definitions.xlsx
@@ -93,10 +108,23 @@ taxonomy_raw:
 taxonomy_normalized:
   type: MemoryDataset
 
-taxonomy_adjacency:
+embedding_model:
+  type: MemoryDataset
+
+taxonomy_with_label_embeddings:
+  type: MemoryDataset
+
+taxonomy_with_definition_embeddings:
+  type: MemoryDataset
+
+taxonomy_with_examples_embeddings:
   type: MemoryDataset
 
 taxonomy_embeddings:
+  type: MemoryDataset
+
+# Deprecated - kept for backward compatibility
+taxonomy_adjacency:
   type: MemoryDataset
 
 # Build taxonomy pipeline output (numpy-based index)
