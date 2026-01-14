@@ -360,3 +360,59 @@ ensemble_predictions:
 
 ensemble_results:
   type: MemoryDataset
+
+# =============================================================================
+# Module 2 - Inference Pipeline Datasets
+# =============================================================================
+
+# Setup phase outputs (loaded once per session)
+inference_embedding_model:
+  type: MemoryDataset
+
+inference_taxonomy_df:
+  type: MemoryDataset
+
+inference_taxonomy_graph:
+  type: MemoryDataset
+
+inference_retrieval_index:
+  type: MemoryDataset
+
+inference_scoring_views:
+  type: MemoryDataset
+
+# Query phase inputs
+inference_query_text:
+  type: MemoryDataset
+
+# Query phase outputs (per query)
+inference_query_embedding:
+  type: MemoryDataset
+
+inference_candidates:
+  type: MemoryDataset
+
+inference_routing_result:
+  type: MemoryDataset
+
+inference_prediction:
+  type: MemoryDataset
+
+# Batch inference datasets (for evaluation)
+# Input: Can be string, list, or DataFrame
+inference_query_input:
+  type: MemoryDataset
+
+# Intermediate: DataFrame with query_id and text
+inference_queries_df:
+  type: MemoryDataset
+
+# Intermediate: DataFrame with embeddings added
+inference_queries_embedded_df:
+  type: MemoryDataset
+
+# Output: DataFrame with all predictions
+# Using MemoryDataset for development/testing
+# Change to pandas.CSVDataset for production persistence
+inference_predictions_df:
+  type: MemoryDataset

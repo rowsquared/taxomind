@@ -23,5 +23,71 @@ zero_shot:
   # Disagreement Detection parameters
   disagreement_threshold: 3  # Minimum number of different parents to consider as disagreement
 
+# =============================================================================
+# Module 2 - Inference Pipeline Parameters
+# =============================================================================
 
+# Query text for inference (can be overridden via --params)
+inference_query_text: "I work as a software developer"
+
+# Batch inference input (supports multiple modes)
+# Mode 1: Single string
+# inference_query_input: "I work as a software developer"
+
+# Mode 2: List of strings
+# inference_query_input:
+#   - "I work as a software developer"
+#   - "I manage a retail store"
+#   - "I teach mathematics at a university"
+
+# Mode 3: DataFrame via catalog (define in catalog.yml)
+# inference_query_input:
+#   type: pandas.CSVDataset
+#   filepath: data/01_raw/queries.csv
+
+# Default: Use single query mode for testing
+inference_query_input: "I work as a software developer"
+
+inference:
+  # Retrieval parameters
+  retrieval_k: 20  # Number of initial candidates to retrieve via label similarity
+                   # Increased from 10 for better recall
+
+  beam_count: 2  # Number of root (L1) beams to select for routing
+                 # Prevents semantic dilution from mixing diverse topics
+                 # Example: Separates "Legislator" from "Teacher" branches
+                 # Higher values = more exploration, lower values = more focused
+
+  # Routing parameters (asymmetric stopping)
+  min_descent_gap: 0.05  # Minimum score gap between best/second sibling to descend
+                          # Higher values = more conservative descent (stop earlier)
+                          # Prevents over-specification (Education problem)
+
+  parent_veto_margin: 0.05  # Margin for parent competitiveness check
+                             # If parent_score + margin >= child_score, stop at parent
+                             # Prevents forcing descent when parent is competitive
+
+  # Evidence parameters (per-node dynamic blending)
+  evidence_tau: 10.0  # Confidence threshold for beta computation
+                      # beta_n = min(k / (k + tau), max_beta)
+                      # Higher tau = slower evidence influence growth
+                      # Lower tau = faster evidence influence growth
+
+  evidence_max_beta: 0.8  # Maximum weight for evidence blending
+                          # Caps evidence influence to prevent complete override
+                          # 0.8 = max 80% evidence, 20% label (maintains taxonomy prior)
+
+  short_query_tokens: 2  # Short-query threshold for label/evidence-only scoring
+
+  validation_threshold: 0.05  # Override threshold for scoped validation
+
+  # Optional constraints
+  max_depth: null  # Maximum depth to descend (null = no limit)
+                   # Can be used to enforce stopping at specific level
+                   # Example: max_depth: 3 stops at level 3 even if clear winner at level 4
+
+  # Batch processing parameters
+  embedding_batch_size: 32  # Batch size for embedding queries
+                             # Higher values = faster for large batches (more GPU memory)
+                             # Lower values = more memory-efficient (less GPU memory)
 

@@ -194,11 +194,14 @@ def build_label_embeddings(
 
     logger.info(f"Label embeddings created: shape={label_embeddings.shape}")
 
+    ### TODO! this normalization should be redundant with normalize_embeddings=True Can be removed after testing.
     # Verify normalization
     norms = np.linalg.norm(label_embeddings, axis=1)
     if not np.allclose(norms, 1.0, atol=1e-5):
         logger.warning("Embeddings not properly normalized, normalizing now...")
         label_embeddings = label_embeddings / norms[:, np.newaxis]
+    ###
+
 
     # Add embeddings as a column (each row gets its embedding vector)
     df["embedding_label"] = list(label_embeddings)
@@ -260,13 +263,14 @@ def build_definition_embeddings(
         )
 
         logger.info(f"Definition embeddings created: shape={definition_embeddings.shape}")
+        ### TODO! this normalization should be redundant with normalize_embeddings=True Can be removed after testing.
 
         # Verify normalization
         norms = np.linalg.norm(definition_embeddings, axis=1)
         if not np.allclose(norms, 1.0, atol=1e-5):
             logger.warning("Definition embeddings not properly normalized, normalizing now...")
             definition_embeddings = definition_embeddings / norms[:, np.newaxis]
-
+        ###
     # Initialize column with None
     df["embedding_definition"] = None
 
@@ -323,12 +327,13 @@ def build_examples_embeddings(
         )
 
         logger.info(f"Examples embeddings created: shape={examples_embeddings.shape}")
-
+        ### TODO! this normalization should be redundant with normalize_embeddings=True Can be removed after testing. 
         # Verify normalization
         norms = np.linalg.norm(examples_embeddings, axis=1)
         if not np.allclose(norms, 1.0, atol=1e-5):
             logger.warning("Examples embeddings not properly normalized, normalizing now...")
             examples_embeddings = examples_embeddings / norms[:, np.newaxis]
+        ###
     else:
         logger.info("No examples found to embed")
 
@@ -338,14 +343,14 @@ def build_examples_embeddings(
     # Assign embeddings to rows with examples
     for i, idx in enumerate(indices_to_embed):
         df.at[idx, "embedding_examples"] = examples_embeddings[i]
-
+    ### TODO! consider removing the part below after testing, this is just logging.
     nodes_with_examples = len(indices_to_embed)
     nodes_without_examples = len(df) - nodes_with_examples
     logger.info(
         f"Examples embedding complete: {nodes_with_examples} with examples, "
         f"{nodes_without_examples} without examples (None)"
     )
-
+    ###
     return df
 
 
