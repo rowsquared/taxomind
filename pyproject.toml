@@ -18,7 +18,8 @@ dependencies = [
     "seaborn~=0.12.1",
     "sentence-transformers>=3.0.0",
     "numpy>=1.24.0",
-    "einops>=0.8.0"
+    "einops>=0.8.0",
+    "txtai>=8.4.0",
 ]
 
 [project.scripts]

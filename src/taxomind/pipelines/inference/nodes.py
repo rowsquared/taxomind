@@ -20,6 +20,8 @@ import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 
+from taxomind.utils import embedding_utils
+
 logger = logging.getLogger(__name__)
 
 
@@ -285,7 +287,10 @@ def build_retrieval_index(taxonomy_df: pd.DataFrame) -> Dict[str, Any]:
 # ============================================================================
 
 
-def prepare_scoring_views(taxonomy_df: pd.DataFrame) -> Dict[str, Any]:
+def prepare_scoring_views(
+    taxonomy_df: pd.DataFrame,
+    use_updated_evidence: bool = True,
+) -> Dict[str, Any]:
     """
     Prepare multi-view embeddings for fast O(1) scoring.
 
@@ -307,10 +312,12 @@ def prepare_scoring_views(taxonomy_df: pd.DataFrame) -> Dict[str, Any]:
         - 'code_to_ex_emb': Dict[code -> np.ndarray] examples embeddings
         - 'code_to_evidence': Dict[code -> tuple(centroid, count)]
         - 'taxonomy_df': Original DataFrame (for level/label lookup)
+        - use_updated_evidence: Toggle evidence usage in scoring views
 
     Spec Reference:
         Module 2 — Inference, Step 4: Prepare scoring views
         Multi-view scoring: label + definition + examples + evidence
+        Evidence usage can be disabled to ignore learning updates.
 
     Design Decision:
         O(1) dict lookups (not DataFrame.iloc) for performance during routing
@@ -344,23 +351,25 @@ def prepare_scoring_views(taxonomy_df: pd.DataFrame) -> Dict[str, Any]:
             nodes_with_ex += 1
 
         # Evidence (optional, from Module 3)
-        evidence_centroid = row.get("evidence_centroid")
-        evidence_count = int(row.get("evidence_count", 0))
+        if use_updated_evidence:
+            evidence_centroid = row.get("evidence_centroid")
+            evidence_count = int(row.get("evidence_count", 0))
 
-        if evidence_count > 0 and not _is_missing_embedding(evidence_centroid):
-            code_to_evidence[code] = (
-                np.array(evidence_centroid),
-                evidence_count
-            )
-            nodes_with_evidence += 1
-            total_evidence_count += evidence_count
+            if evidence_count > 0 and not _is_missing_embedding(evidence_centroid):
+                code_to_evidence[code] = (
+                    np.array(evidence_centroid),
+                    evidence_count
+                )
+                nodes_with_evidence += 1
+                total_evidence_count += evidence_count
 
     logger.info(
         f"Prepared scoring views: {len(code_to_label_emb)} nodes, "
         f"{nodes_with_def} with definition, "
         f"{nodes_with_ex} with examples, "
         f"{nodes_with_evidence} with evidence "
-        f"({total_evidence_count} corrections)"
+        f"({total_evidence_count} corrections), "
+        f"use_updated_evidence={use_updated_evidence}"
     )
 
     return {
@@ -474,6 +483,7 @@ def embed_queries(
     queries_df: pd.DataFrame,
     embedding_model: SentenceTransformer,
     batch_size: int = 32,
+    query_prefix: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Embed multiple queries in batch for efficiency.
@@ -486,6 +496,7 @@ def embed_queries(
         queries_df: DataFrame with 'text' column
         embedding_model: Pre-loaded SentenceTransformer model
         batch_size: Batch size for encoding (default 32)
+        query_prefix: Optional prefix added before non-empty query text
 
     Returns:
         DataFrame with added 'embedding' column (np.ndarray per row)
@@ -495,14 +506,13 @@ def embed_queries(
         Architectural extension: Batch support
     """
     texts = queries_df["text"].tolist()
-
-    # Encode all queries in batch
-    embeddings = embedding_model.encode(
+    embeddings, _ = embedding_utils.encode_texts(
+        embedding_model,
         texts,
+        embed_all=True,
+        input_prefix=query_prefix,
         batch_size=batch_size,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-        show_progress_bar=len(texts) > 10,  # Show progress for large batches
+        show_progress_bar=len(texts) > 10,
     )
 
     # Add embeddings to DataFrame (as list of arrays for proper storage)
@@ -525,6 +535,7 @@ def embed_queries(
 def embed_query(
     query_text: str,
     embedding_model: SentenceTransformer,
+    query_prefix: Optional[str] = None,
 ) -> np.ndarray:
     """
     Embed input query text for similarity comparison.
@@ -538,6 +549,7 @@ def embed_query(
     Args:
         query_text: Input text to classify
         embedding_model: Pre-loaded SentenceTransformer model
+        query_prefix: Optional prefix added before non-empty query text
 
     Returns:
         L2-normalized query embedding vector
@@ -546,11 +558,15 @@ def embed_query(
         Module 2 — Inference, Step 5: Embed query
     """
     # Encode query
-    query_embedding = embedding_model.encode(
+    embeddings, _ = embedding_utils.encode_texts(
+        embedding_model,
         [query_text],
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    )[0]
+        embed_all=True,
+        input_prefix=query_prefix,
+        batch_size=1,
+        show_progress_bar=False,
+    )
+    query_embedding = embeddings[0]
 
     logger.info(
         f"Embedded query: text_length={len(query_text)}, "
@@ -1280,6 +1296,337 @@ def format_predictions(
 # ============================================================================
 
 
+def batch_retrieve_candidates(
+    queries_df: pd.DataFrame,
+    retrieval_index: Dict[str, Any],
+    retrieval_k: int = 10,
+    beam_count: int = 2,
+) -> pd.DataFrame:
+    """
+    Retrieve candidates for each query in batch.
+
+    Args:
+        queries_df: DataFrame with 'query_id', 'text', and 'embedding' columns
+        retrieval_index: Label-based index from build_retrieval_index
+        retrieval_k: Number of candidates to retrieve
+        beam_count: Number of root beams to select
+
+    Returns:
+        DataFrame with added columns:
+        - candidates: Dict with retrieval output
+        - error: Optional error string for failed rows
+    """
+    df = queries_df.copy()
+    df["candidates"] = None
+    df["error"] = None
+
+    total = len(df)
+    logger.info(f"Starting batch candidate retrieval for {total} queries")
+
+    for i, (idx, row) in enumerate(df.iterrows(), start=1):
+        query_id = row["query_id"]
+        try:
+            candidates_dict = retrieve_candidates(
+                query_embedding=row["embedding"],
+                retrieval_index=retrieval_index,
+                retrieval_k=retrieval_k,
+                beam_count=beam_count,
+            )
+            df.at[idx, "candidates"] = candidates_dict
+        except Exception as e:
+            logger.error(
+                f"Error retrieving candidates for query_id={query_id}: {e}",
+                exc_info=True,
+            )
+            df.at[idx, "error"] = str(e)
+
+        if i % 10 == 0 or i == total:
+            logger.info(f"Retrieved candidates for {i}/{total} queries")
+
+    return df
+
+
+def batch_route_topdown(
+    candidates_df: pd.DataFrame,
+    scoring_views: Dict[str, Any],
+    taxonomy_graph: Dict[str, List[str]],
+    min_descent_gap: float = 0.05,
+    parent_veto_margin: float = 0.05,
+    evidence_tau: float = 10.0,
+    evidence_max_beta: float = 0.8,
+    short_query_tokens: int = 2,
+    max_depth: Optional[int] = None,
+) -> pd.DataFrame:
+    """
+    Route each query top-down in batch.
+
+    Args:
+        candidates_df: DataFrame with retrieval output in 'candidates'
+        scoring_views: Multi-view handles from prepare_scoring_views
+        taxonomy_graph: Parent-child adjacency
+        min_descent_gap: Sibling separation threshold
+        parent_veto_margin: Parent competitiveness margin
+        evidence_tau: Evidence confidence threshold
+        evidence_max_beta: Evidence weight cap
+        short_query_tokens: Token threshold for short-query rule
+        max_depth: Optional maximum depth
+
+    Returns:
+        DataFrame with added columns:
+        - routing_result: Dict with routing output
+        - error: Optional error string for failed rows
+    """
+    df = candidates_df.copy()
+    if "error" not in df.columns:
+        df["error"] = None
+    df["routing_result"] = None
+
+    total = len(df)
+    logger.info(f"Starting batch routing for {total} queries")
+
+    for i, (idx, row) in enumerate(df.iterrows(), start=1):
+        if row.get("error"):
+            continue
+
+        query_id = row["query_id"]
+        query_text = row["text"]
+        query_embedding = row["embedding"]
+        candidates_dict = row.get("candidates")
+
+        if not candidates_dict:
+            df.at[idx, "error"] = "missing candidates"
+            continue
+
+        try:
+            beam_roots = candidates_dict.get("beam_roots") or []
+            if not beam_roots:
+                beam_roots = [None]
+
+            beam_results = []
+            for root in beam_roots:
+                beam_results.append(
+                    route_query_topdown(
+                        query_embedding=query_embedding,
+                        query_text=query_text,
+                        candidates_dict=candidates_dict,
+                        scoring_views=scoring_views,
+                        taxonomy_graph=taxonomy_graph,
+                        min_descent_gap=min_descent_gap,
+                        parent_veto_margin=parent_veto_margin,
+                        evidence_tau=evidence_tau,
+                        evidence_max_beta=evidence_max_beta,
+                        short_query_tokens=short_query_tokens,
+                        max_depth=max_depth,
+                        beam_root=root,
+                    )
+                )
+
+            routing_result = max(
+                beam_results,
+                key=lambda r: (r["score"], not r["ambiguous"], r["predicted_level"]),
+            )
+
+            df.at[idx, "routing_result"] = routing_result
+
+        except Exception as e:
+            logger.error(
+                f"Error routing query_id={query_id}: {e}",
+                exc_info=True,
+            )
+            df.at[idx, "error"] = str(e)
+
+        if i % 10 == 0 or i == total:
+            logger.info(f"Routed {i}/{total} queries")
+
+    return df
+
+
+def batch_validate_scoped(
+    routing_df: pd.DataFrame,
+    scoring_views: Dict[str, Any],
+    taxonomy_graph: Dict[str, List[str]],
+    retrieval_index: Dict[str, Any],
+    evidence_tau: float = 10.0,
+    evidence_max_beta: float = 0.8,
+    validation_threshold: float = 0.05,
+    validation_override_margin: Optional[float] = None,
+    short_query_tokens: int = 2,
+) -> pd.DataFrame:
+    """
+    Apply scoped validation to each routed query in batch.
+
+    Args:
+        routing_df: DataFrame with 'routing_result' per query
+        scoring_views: Multi-view handles from prepare_scoring_views
+        taxonomy_graph: Parent-child adjacency
+        retrieval_index: Retrieval index (for parent lookup)
+        evidence_tau: Evidence confidence threshold
+        evidence_max_beta: Evidence weight cap
+        validation_threshold: Override threshold for scoped validation
+        validation_override_margin: Optional override margin
+        short_query_tokens: Token threshold for short-query rule
+
+    Returns:
+        DataFrame with updated 'routing_result' including validation fields.
+    """
+    df = routing_df.copy()
+    if "error" not in df.columns:
+        df["error"] = None
+
+    total = len(df)
+    logger.info(f"Starting scoped validation for {total} queries")
+
+    for i, (idx, row) in enumerate(df.iterrows(), start=1):
+        if row.get("error"):
+            continue
+
+        query_id = row["query_id"]
+        query_text = row["text"]
+        query_embedding = row["embedding"]
+        candidates_dict = row.get("candidates")
+        routing_result = row.get("routing_result")
+
+        if not candidates_dict or not routing_result:
+            df.at[idx, "error"] = "missing candidates or routing_result"
+            continue
+
+        try:
+            validation_result = validate_prediction_scoped(
+                query_embedding=query_embedding,
+                query_text=query_text,
+                routing_result=routing_result,
+                candidates_dict=candidates_dict,
+                scoring_views=scoring_views,
+                taxonomy_graph=taxonomy_graph,
+                evidence_tau=evidence_tau,
+                evidence_max_beta=evidence_max_beta,
+                validation_threshold=validation_threshold,
+                validation_override_margin=validation_override_margin,
+                short_query_tokens=short_query_tokens,
+            )
+
+            routing_result.update(validation_result)
+
+            if routing_result.get("validation_status") == "OVERRIDE":
+                override_code = routing_result.get("validation_override_code")
+                if override_code:
+                    routing_result["path"] = _build_path_to_root(
+                        override_code, retrieval_index["code_to_parent"]
+                    )
+                    routing_result["stopping_reason"] = (
+                        f"{routing_result['stopping_reason']}|validation_override"
+                    )
+
+            df.at[idx, "routing_result"] = routing_result
+
+        except Exception as e:
+            logger.error(
+                f"Error validating query_id={query_id}: {e}",
+                exc_info=True,
+            )
+            df.at[idx, "error"] = str(e)
+
+        if i % 10 == 0 or i == total:
+            logger.info(f"Validated {i}/{total} queries")
+
+    return df
+
+
+def format_predictions_batch(
+    validated_df: pd.DataFrame,
+    taxonomy_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Format routing outputs into the final predictions DataFrame.
+
+    Args:
+        validated_df: DataFrame with 'routing_result' per query
+        taxonomy_df: Taxonomy DataFrame (for label lookup)
+
+    Returns:
+        DataFrame with prediction columns for all queries.
+    """
+    results = []
+    total = len(validated_df)
+    logger.info(f"Starting batch prediction formatting for {total} queries")
+
+    for i, (_, row) in enumerate(validated_df.iterrows(), start=1):
+        query_id = row["query_id"]
+        query_text = row["text"]
+        error = row.get("error")
+
+        if error:
+            results.append({
+                "query_id": query_id,
+                "query": query_text,
+                "predicted_code": None,
+                "predicted_label": None,
+                "predicted_level": None,
+                "score": None,
+                "ambiguous": None,
+                "alternatives": None,
+                "stopping_reason": f"error: {error}",
+                "path": None,
+                "validation_status": None,
+                "validation_override_code": None,
+                "validation_margin": None,
+            })
+            continue
+
+        routing_result = row.get("routing_result")
+        if not routing_result:
+            results.append({
+                "query_id": query_id,
+                "query": query_text,
+                "predicted_code": None,
+                "predicted_label": None,
+                "predicted_level": None,
+                "score": None,
+                "ambiguous": None,
+                "alternatives": None,
+                "stopping_reason": "error: missing routing_result",
+                "path": None,
+                "validation_status": None,
+                "validation_override_code": None,
+                "validation_margin": None,
+            })
+            continue
+
+        prediction = format_predictions(
+            routing_result=routing_result,
+            taxonomy_df=taxonomy_df,
+            query_text=query_text,
+        )
+
+        results.append({
+            "query_id": query_id,
+            "query": query_text,
+            "predicted_code": prediction["prediction"]["code"],
+            "predicted_label": prediction["prediction"]["label"],
+            "predicted_level": prediction["prediction"]["level"],
+            "score": prediction["prediction"]["score"],
+            "ambiguous": prediction["ambiguous"],
+            "alternatives": prediction["alternatives"],
+            "stopping_reason": prediction["stopping_reason"],
+            "path": prediction["path"],
+            "validation_status": prediction["validation_status"],
+            "validation_override_code": prediction["validation_override_code"],
+            "validation_margin": prediction["validation_margin"],
+        })
+
+        if i % 10 == 0 or i == total:
+            logger.info(f"Formatted {i}/{total} queries")
+
+    results_df = pd.DataFrame(results)
+
+    logger.info(
+        f"Batch inference complete: {len(results_df)} predictions, "
+        f"{len(results_df[results_df['predicted_code'].notna()])} successful"
+    )
+
+    return results_df
+
+
 def batch_inference(
     queries_df: pd.DataFrame,
     retrieval_index: Dict[str, Any],
@@ -1345,134 +1692,35 @@ def batch_inference(
         3. Progress tracking for large batches
         4. Simpler error handling per query
     """
-    results = []
-
-    logger.info(f"Starting batch inference for {len(queries_df)} queries")
-
-    for idx, row in queries_df.iterrows():
-        query_id = row["query_id"]
-        query_text = row["text"]
-        query_embedding = row["embedding"]
-
-        try:
-            # Step 1: Retrieve candidates with structural closure
-            candidates_dict = retrieve_candidates(
-                query_embedding=query_embedding,
-                retrieval_index=retrieval_index,
-                retrieval_k=retrieval_k,
-                beam_count=beam_count,
-            )
-
-            # Step 2: Route query (true top-down with multi-view scoring)
-            beam_roots = candidates_dict.get("beam_roots") or []
-            if not beam_roots:
-                beam_roots = [None]
-
-            beam_results = []
-            for root in beam_roots:
-                beam_results.append(
-                    route_query_topdown(
-                        query_embedding=query_embedding,
-                        query_text=query_text,
-                        candidates_dict=candidates_dict,
-                        scoring_views=scoring_views,
-                        taxonomy_graph=taxonomy_graph,
-                        min_descent_gap=min_descent_gap,
-                        parent_veto_margin=parent_veto_margin,
-                        evidence_tau=evidence_tau,
-                        evidence_max_beta=evidence_max_beta,
-                        short_query_tokens=short_query_tokens,
-                        max_depth=max_depth,
-                        beam_root=root,
-                    )
-                )
-
-            routing_result = max(
-                beam_results,
-                key=lambda r: (r["score"], not r["ambiguous"], r["predicted_level"]),
-            )
-
-            # Step 3: Scoped validation (HiRAG-style)
-            validation_result = validate_prediction_scoped(
-                query_embedding=query_embedding,
-                query_text=query_text,
-                routing_result=routing_result,
-                candidates_dict=candidates_dict,
-                scoring_views=scoring_views,
-                taxonomy_graph=taxonomy_graph,
-                evidence_tau=evidence_tau,
-                evidence_max_beta=evidence_max_beta,
-                validation_threshold=validation_threshold,
-                validation_override_margin=validation_override_margin,
-                short_query_tokens=short_query_tokens,
-            )
-
-            routing_result.update(validation_result)
-
-            if routing_result.get("validation_status") == "OVERRIDE":
-                override_code = routing_result.get("validation_override_code")
-                if override_code:
-                    routing_result["path"] = _build_path_to_root(
-                        override_code, retrieval_index["code_to_parent"]
-                    )
-                    routing_result["stopping_reason"] = (
-                        f"{routing_result['stopping_reason']}|validation_override"
-                    )
-
-            # Step 4: Format prediction
-            prediction = format_predictions(
-                routing_result=routing_result,
-                taxonomy_df=taxonomy_df,
-                query_text=query_text,
-            )
-
-            # Flatten prediction to row format
-            results.append({
-                "query_id": query_id,
-                "query": query_text,
-                "predicted_code": prediction["prediction"]["code"],
-                "predicted_label": prediction["prediction"]["label"],
-                "predicted_level": prediction["prediction"]["level"],
-                "score": prediction["prediction"]["score"],
-                "ambiguous": prediction["ambiguous"],
-                "alternatives": prediction["alternatives"],  # Will be serialized as JSON
-                "stopping_reason": prediction["stopping_reason"],
-                "path": prediction["path"],  # Will be serialized as JSON
-                "validation_status": prediction["validation_status"],
-                "validation_override_code": prediction["validation_override_code"],
-                "validation_margin": prediction["validation_margin"],
-            })
-
-            if (idx + 1) % 10 == 0 or (idx + 1) == len(queries_df):
-                logger.info(f"Processed {idx + 1}/{len(queries_df)} queries")
-
-        except Exception as e:
-            logger.error(
-                f"Error processing query_id={query_id}: {e}",
-                exc_info=True
-            )
-            # Add error row
-            results.append({
-                "query_id": query_id,
-                "query": query_text,
-                "predicted_code": None,
-                "predicted_label": None,
-                "predicted_level": None,
-                "score": None,
-                "ambiguous": None,
-                "alternatives": None,
-                "stopping_reason": f"error: {str(e)}",
-                "path": None,
-                "validation_status": None,
-                "validation_override_code": None,
-                "validation_margin": None,
-            })
-
-    results_df = pd.DataFrame(results)
-
-    logger.info(
-        f"Batch inference complete: {len(results_df)} predictions, "
-        f"{len(results_df[results_df['predicted_code'].notna()])} successful"
+    candidates_df = batch_retrieve_candidates(
+        queries_df=queries_df,
+        retrieval_index=retrieval_index,
+        retrieval_k=retrieval_k,
+        beam_count=beam_count,
     )
-
-    return results_df
+    routing_df = batch_route_topdown(
+        candidates_df=candidates_df,
+        scoring_views=scoring_views,
+        taxonomy_graph=taxonomy_graph,
+        min_descent_gap=min_descent_gap,
+        parent_veto_margin=parent_veto_margin,
+        evidence_tau=evidence_tau,
+        evidence_max_beta=evidence_max_beta,
+        short_query_tokens=short_query_tokens,
+        max_depth=max_depth,
+    )
+    validated_df = batch_validate_scoped(
+        routing_df=routing_df,
+        scoring_views=scoring_views,
+        taxonomy_graph=taxonomy_graph,
+        retrieval_index=retrieval_index,
+        evidence_tau=evidence_tau,
+        evidence_max_beta=evidence_max_beta,
+        validation_threshold=validation_threshold,
+        validation_override_margin=validation_override_margin,
+        short_query_tokens=short_query_tokens,
+    )
+    return format_predictions_batch(
+        validated_df=validated_df,
+        taxonomy_df=taxonomy_df,
+    )

@@ -7,6 +7,7 @@ for fast exact similarity search suitable for taxonomies with <1k nodes.
 
 from kedro.pipeline import Pipeline, node, pipeline
 
+from taxomind.utils import embedding_utils
 from . import nodes
 
 
@@ -42,26 +43,45 @@ def create_pipeline(**kwargs) -> Pipeline:
                 name="normalize_prototype_views",
             ),
             node(
-                func=nodes.load_embedding_model,
-                inputs="params:model_name",
+                func=embedding_utils.load_embedding_model,
+                inputs=[
+                    "params:model_name",
+                    "params:embedding.cache_dir",
+                    "params:embedding.local_files_only",
+                ],
                 outputs="embedding_model",
                 name="load_embedding_model",
             ),
             node(
-                func=nodes.build_label_embeddings,
-                inputs=["taxonomy_normalized", "embedding_model"],
+                func=nodes.build_text_embeddings,
+                inputs=[
+                    "taxonomy_normalized",
+                    "embedding_model",
+                    "params:embedding_label",
+                    "params:embedding_prefix.document",
+                ],
                 outputs="taxonomy_with_label_embeddings",
                 name="build_label_embeddings",
             ),
             node(
-                func=nodes.build_definition_embeddings,
-                inputs=["taxonomy_with_label_embeddings", "embedding_model"],
+                func=nodes.build_text_embeddings,
+                inputs=[
+                    "taxonomy_with_label_embeddings",
+                    "embedding_model",
+                    "params:embedding_definition",
+                    "params:embedding_prefix.document",
+                ],
                 outputs="taxonomy_with_definition_embeddings",
                 name="build_definition_embeddings",
             ),
             node(
-                func=nodes.build_examples_embeddings,
-                inputs=["taxonomy_with_definition_embeddings", "embedding_model"],
+                func=nodes.build_text_embeddings,
+                inputs=[
+                    "taxonomy_with_definition_embeddings",
+                    "embedding_model",
+                    "params:embedding_examples",
+                    "params:embedding_prefix.document",
+                ],
                 outputs="taxonomy_with_examples_embeddings",
                 name="build_examples_embeddings",
             ),
@@ -114,26 +134,45 @@ def create_pipeline_from_request(**kwargs) -> Pipeline:
                 name="normalize_prototype_views",
             ),
             node(
-                func=nodes.load_embedding_model,
-                inputs="params:model_name",
+                func=embedding_utils.load_embedding_model,
+                inputs=[
+                    "params:model_name",
+                    "params:embedding.cache_dir",
+                    "params:embedding.local_files_only",
+                ],
                 outputs="embedding_model",
                 name="load_embedding_model",
             ),
             node(
-                func=nodes.build_label_embeddings,
-                inputs=["taxonomy_normalized", "embedding_model"],
+                func=nodes.build_text_embeddings,
+                inputs=[
+                    "taxonomy_normalized",
+                    "embedding_model",
+                    "params:embedding_label",
+                    "params:embedding_prefix.document",
+                ],
                 outputs="taxonomy_with_label_embeddings",
                 name="build_label_embeddings",
             ),
             node(
-                func=nodes.build_definition_embeddings,
-                inputs=["taxonomy_with_label_embeddings", "embedding_model"],
+                func=nodes.build_text_embeddings,
+                inputs=[
+                    "taxonomy_with_label_embeddings",
+                    "embedding_model",
+                    "params:embedding_definition",
+                    "params:embedding_prefix.document",
+                ],
                 outputs="taxonomy_with_definition_embeddings",
                 name="build_definition_embeddings",
             ),
             node(
-                func=nodes.build_examples_embeddings,
-                inputs=["taxonomy_with_definition_embeddings", "embedding_model"],
+                func=nodes.build_text_embeddings,
+                inputs=[
+                    "taxonomy_with_definition_embeddings",
+                    "embedding_model",
+                    "params:embedding_examples",
+                    "params:embedding_prefix.document",
+                ],
                 outputs="taxonomy_with_examples_embeddings",
                 name="build_examples_embeddings",
             ),

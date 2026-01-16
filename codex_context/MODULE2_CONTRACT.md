@@ -13,6 +13,13 @@ Typical node chain (names indicative):
 8. validate_prediction_scoped (HiRAG-style, scoped to candidate set)
 9. format_results
 
+Batch pipeline note (current implementation):
+The batch flow is split into four nodes:
+1) batch_retrieve_candidates
+2) batch_route_topdown
+3) batch_validate_scoped
+4) format_predictions_batch
+
 ## Multi-view scoring (routing + validation)
 Score defaults to **max across available views**, with short-query protection.
 

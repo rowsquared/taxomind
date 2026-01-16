@@ -64,6 +64,24 @@ taxonomy_definition:
   filename_suffix: .csv
 
 
+taxonomy_definition_llm:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/taxonomies/llm_enriched
+  dataset:
+    type: pandas.CSVDataset
+    load_args:
+      dtype:
+        code: str
+        parentCode: str
+        definition: str
+        examples: str
+    save_args:
+      encoding: utf-8
+      index: false
+      quoting: 1      # csv.QUOTE_ALL
+      quotechar: '"' 
+  filename_suffix: .csv
+
 taxonomy_request:
   type: MemoryDataset
 
@@ -88,6 +106,19 @@ training_sentences:
   filename_suffix: .json
 
   
+# =============================================================================
+# Error analysis datasets
+# =============================================================================
+
+error_analysis_classifai_targets:
+  type: MemoryDataset
+
+error_analysis_taxonomy_training_targets:
+  type: MemoryDataset
+
+error_analysis_training_sentences_targets:
+  type: MemoryDataset
+
 
 taxonomy_table:
   type: MemoryDataset
@@ -99,6 +130,22 @@ taxonomy_validated:
   type: MemoryDataset
 
 taxonomy_enriched:
+  type: MemoryDataset
+
+# Enrich taxonomy pipeline intermediate datasets
+taxonomy_prepared:
+  type: MemoryDataset
+
+taxonomy_with_paths:
+  type: MemoryDataset
+
+enrich_embedding_model:
+  type: MemoryDataset
+
+taxonomy_with_similar:
+  type: MemoryDataset
+
+taxonomy_llm_enriched:
   type: MemoryDataset
 
 # Build taxonomy pipeline intermediate datasets
@@ -129,6 +176,12 @@ taxonomy_adjacency:
 
 # Build taxonomy pipeline output (numpy-based index)
 taxonomy_index:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/taxonomies/index
+  dataset: pandas.ParquetDataset
+  filename_suffix: .parquet
+
+taxonomy_index_input:
   type: partitions.PartitionedDataset
   path: data/03_primary/taxonomies/index
   dataset: pandas.ParquetDataset
@@ -237,6 +290,27 @@ api_training_payload:
       indent: 2
       ensure_ascii: false
   filename_suffix: .json
+
+learning_validated_payload:
+  type: MemoryDataset
+
+learning_updates_df:
+  type: MemoryDataset
+
+learning_taxonomy_key:
+  type: MemoryDataset
+
+learning_taxonomy_df:
+  type: MemoryDataset
+
+learning_embedded_updates_df:
+  type: MemoryDataset
+
+learning_embed_stats:
+  type: MemoryDataset
+
+learning_update_summary:
+  type: MemoryDataset
 
 job_config:
   type: partitions.PartitionedDataset
@@ -409,6 +483,22 @@ inference_queries_df:
 
 # Intermediate: DataFrame with embeddings added
 inference_queries_embedded_df:
+  type: MemoryDataset
+
+# Intermediate: DataFrame with candidates per query
+inference_candidates_df:
+  type: MemoryDataset
+
+# Intermediate: DataFrame with routing results per query
+inference_routing_df:
+  type: MemoryDataset
+
+# Intermediate: DataFrame with validation results per query
+inference_validated_df:
+  type: MemoryDataset
+
+# Intermediate: DataFrame with routing/validation results per query (legacy)
+inference_routing_results_df:
   type: MemoryDataset
 
 # Output: DataFrame with all predictions

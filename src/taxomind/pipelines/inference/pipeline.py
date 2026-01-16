@@ -14,6 +14,7 @@ Spec Reference: Module 2 — Inference
 
 from kedro.pipeline import Pipeline, node, pipeline
 
+from taxomind.utils import embedding_utils
 from .nodes import (
     load_taxonomy_index,
     load_taxonomy_graph,
@@ -21,7 +22,10 @@ from .nodes import (
     prepare_scoring_views,
     load_queries,
     embed_queries,
-    batch_inference,
+    batch_retrieve_candidates,
+    batch_route_topdown,
+    batch_validate_scoped,
+    format_predictions_batch,
 )
 
 
@@ -97,8 +101,12 @@ def create_pipeline(**kwargs) -> Pipeline:
             # Setup Phase: Load taxonomy and build indices (once per session)
             # ================================================================
             node(
-                func=lambda model_name: __import__('sentence_transformers', fromlist=['SentenceTransformer']).SentenceTransformer(model_name, trust_remote_code=True),
-                inputs="params:model_name",
+                func=embedding_utils.load_embedding_model,
+                inputs=[
+                    "params:model_name",
+                    "params:embedding.cache_dir",
+                    "params:embedding.local_files_only",
+                ],
                 outputs="inference_embedding_model",
                 name="load_inference_embedding_model",
             ),
@@ -122,7 +130,10 @@ def create_pipeline(**kwargs) -> Pipeline:
             ),
             node(
                 func=prepare_scoring_views,
-                inputs="inference_taxonomy_df",
+                inputs=[
+                    "inference_taxonomy_df",
+                    "params:inference.use_updated_evidence",
+                ],
                 outputs="inference_scoring_views",
                 name="prepare_scoring_views_node",
             ),
@@ -141,30 +152,61 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "inference_queries_df",
                     "inference_embedding_model",
                     "params:inference.embedding_batch_size",
+                    "params:embedding_prefix.query",
                 ],
                 outputs="inference_queries_embedded_df",
                 name="embed_queries_node",
             ),
             node(
-                func=batch_inference,
+                func=batch_retrieve_candidates,
                 inputs=[
                     "inference_queries_embedded_df",
                     "inference_retrieval_index",
-                    "inference_scoring_views",
-                    "inference_taxonomy_graph",
-                    "inference_taxonomy_df",
                     "params:inference.retrieval_k",
                     "params:inference.beam_count",
+                ],
+                outputs="inference_candidates_df",
+                name="batch_retrieve_candidates_node",
+            ),
+            node(
+                func=batch_route_topdown,
+                inputs=[
+                    "inference_candidates_df",
+                    "inference_scoring_views",
+                    "inference_taxonomy_graph",
                     "params:inference.min_descent_gap",
                     "params:inference.parent_veto_margin",
                     "params:inference.evidence_tau",
                     "params:inference.evidence_max_beta",
                     "params:inference.short_query_tokens",
-                    "params:inference.validation_threshold",
                     "params:inference.max_depth",
                 ],
+                outputs="inference_routing_df",
+                name="batch_route_topdown_node",
+            ),
+            node(
+                func=batch_validate_scoped,
+                inputs=[
+                    "inference_routing_df",
+                    "inference_scoring_views",
+                    "inference_taxonomy_graph",
+                    "inference_retrieval_index",
+                    "params:inference.evidence_tau",
+                    "params:inference.evidence_max_beta",
+                    "params:inference.validation_threshold",
+                    "params:inference.short_query_tokens",
+                ],
+                outputs="inference_validated_df",
+                name="batch_validate_scoped_node",
+            ),
+            node(
+                func=format_predictions_batch,
+                inputs=[
+                    "inference_validated_df",
+                    "inference_taxonomy_df",
+                ],
                 outputs="inference_predictions_df",
-                name="batch_inference_node",
+                name="format_predictions_batch_node",
             ),
         ]
     )
@@ -243,8 +285,12 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
             # Setup Phase: Load taxonomy and build indices (once per batch)
             # ================================================================
             node(
-                func=lambda model_name: __import__('sentence_transformers', fromlist=['SentenceTransformer']).SentenceTransformer(model_name, trust_remote_code=True),
-                inputs="params:model_name",
+                func=embedding_utils.load_embedding_model,
+                inputs=[
+                    "params:model_name",
+                    "params:embedding.cache_dir",
+                    "params:embedding.local_files_only",
+                ],
                 outputs="inference_embedding_model",
                 name="load_inference_embedding_model_batch",
             ),
@@ -268,7 +314,10 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
             ),
             node(
                 func=prepare_scoring_views,
-                inputs="inference_taxonomy_df",
+                inputs=[
+                    "inference_taxonomy_df",
+                    "params:inference.use_updated_evidence",
+                ],
                 outputs="inference_scoring_views",
                 name="prepare_scoring_views_batch",
             ),
@@ -287,30 +336,61 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
                     "inference_queries_df",
                     "inference_embedding_model",
                     "params:inference.embedding_batch_size",
+                    "params:embedding_prefix.query",
                 ],
                 outputs="inference_queries_embedded_df",
                 name="embed_queries_batch",
             ),
             node(
-                func=batch_inference,
+                func=batch_retrieve_candidates,
                 inputs=[
                     "inference_queries_embedded_df",
                     "inference_retrieval_index",
-                    "inference_scoring_views",
-                    "inference_taxonomy_graph",
-                    "inference_taxonomy_df",
                     "params:inference.retrieval_k",
                     "params:inference.beam_count",
+                ],
+                outputs="inference_candidates_df",
+                name="batch_retrieve_candidates_node",
+            ),
+            node(
+                func=batch_route_topdown,
+                inputs=[
+                    "inference_candidates_df",
+                    "inference_scoring_views",
+                    "inference_taxonomy_graph",
                     "params:inference.min_descent_gap",
                     "params:inference.parent_veto_margin",
                     "params:inference.evidence_tau",
                     "params:inference.evidence_max_beta",
                     "params:inference.short_query_tokens",
-                    "params:inference.validation_threshold",
                     "params:inference.max_depth",
                 ],
+                outputs="inference_routing_df",
+                name="batch_route_topdown_node",
+            ),
+            node(
+                func=batch_validate_scoped,
+                inputs=[
+                    "inference_routing_df",
+                    "inference_scoring_views",
+                    "inference_taxonomy_graph",
+                    "inference_retrieval_index",
+                    "params:inference.evidence_tau",
+                    "params:inference.evidence_max_beta",
+                    "params:inference.validation_threshold",
+                    "params:inference.short_query_tokens",
+                ],
+                outputs="inference_validated_df",
+                name="batch_validate_scoped_node",
+            ),
+            node(
+                func=format_predictions_batch,
+                inputs=[
+                    "inference_validated_df",
+                    "inference_taxonomy_df",
+                ],
                 outputs="inference_predictions_df",
-                name="batch_inference_node",
+                name="format_predictions_batch_node",
             ),
         ]
     )

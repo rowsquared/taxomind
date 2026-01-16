@@ -17,6 +17,7 @@ class ZeroShotRunner:
         self._taxonomy: pd.DataFrame | None = None
         self.model_name = model_name
         self.judge_model_name = judge_model_name
+        self.embedding_model = embedding_utils.load_embedding_model(model_name)
 
     def load_taxonomy(self, taxonomy: pd.DataFrame) -> None:
         if "enriched_text" not in taxonomy.columns:
@@ -33,9 +34,14 @@ class ZeroShotRunner:
         if self._taxonomy is None:
             raise ValueError("Taxonomy is not loaded")
 
-        embedding = embedding_utils.embed_texts(
-            [text], model_name=self.model_name
-        )[0]
+        embeddings, _ = embedding_utils.encode_texts(
+            self.embedding_model,
+            [text],
+            embed_all=True,
+            batch_size=1,
+            show_progress_bar=False,
+        )
+        embedding = embeddings[0]
         topdown = zero_shot_nodes.top_down_route(
             input_embedding=embedding,
             taxonomy_embedded=self._taxonomy,

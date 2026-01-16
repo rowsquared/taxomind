@@ -46,14 +46,28 @@ def load_sentences(test_dataset: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], 
 
 
 def compute_sentence_embeddings(
-    test_sentences: List[Dict[str, Any]], model_name: str
+    test_sentences: List[Dict[str, Any]],
+    model_name: str,
+    cache_dir: str | None = None,
+    local_files_only: bool = False,
 ) -> List[Dict[str, Any]]:
     """Embed all inference texts once for downstream independence."""
 
     texts = [record.get("text", "") for record in test_sentences]
-    embeddings = embedding_utils.embed_texts(texts, model_name=model_name)
+    model = embedding_utils.load_embedding_model(
+        model_name,
+        cache_dir=cache_dir,
+        local_files_only=local_files_only,
+    )
+    embeddings, _ = embedding_utils.encode_texts(
+        model,
+        texts,
+        embed_all=True,
+        batch_size=32,
+        show_progress_bar=False,
+    )
     enriched: List[Dict[str, Any]] = []
-    for record, embedding in zip(test_sentences, embeddings):
+    for record, embedding in zip(test_sentences, list(embeddings)):
         enriched_record = dict(record)
         enriched_record["embedding"] = embedding
         enriched.append(enriched_record)

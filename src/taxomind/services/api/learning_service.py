@@ -163,31 +163,40 @@ class LearningPipelineService:
                     message="Finalizing training results",
                 )
 
-                # Load results from in-memory datasets
-                training_summary_dict = catalog.load("training_summary_dict")
-                training_metrics_dict = catalog.load("training_metrics_dict")
-                version_metadata_dict = catalog.load("updated_version_metadata_dict")
-
-                # Extract data for this specific taxonomy
-                training_summary = training_summary_dict.get(taxonomy_key, {})
-                training_metrics = training_metrics_dict.get(taxonomy_key, {})
-                version_metadata = version_metadata_dict.get(taxonomy_key, {})
-
-                # Load appended training data stats
-                appended_data = catalog.load("appended_training_data")
-                total_samples = len(appended_data)
-
-                # Calculate new samples count
-                new_samples = len(training_data.get("sentences", []))
-
-                # Format results
-                result = self._format_results(
-                    training_summary,
-                    training_metrics,
-                    version_metadata,
-                    new_samples,
-                    total_samples,
+                update_summary = self._try_load_dataset(
+                    catalog, "learning_update_summary"
                 )
+
+                if update_summary:
+                    result = self._format_evidence_results(update_summary)
+                else:
+                    # Load results from in-memory datasets
+                    training_summary_dict = catalog.load("training_summary_dict")
+                    training_metrics_dict = catalog.load("training_metrics_dict")
+                    version_metadata_dict = catalog.load(
+                        "updated_version_metadata_dict"
+                    )
+
+                    # Extract data for this specific taxonomy
+                    training_summary = training_summary_dict.get(taxonomy_key, {})
+                    training_metrics = training_metrics_dict.get(taxonomy_key, {})
+                    version_metadata = version_metadata_dict.get(taxonomy_key, {})
+
+                    # Load appended training data stats
+                    appended_data = catalog.load("appended_training_data")
+                    total_samples = len(appended_data)
+
+                    # Calculate new samples count
+                    new_samples = len(training_data.get("sentences", []))
+
+                    # Format results
+                    result = self._format_results(
+                        training_summary,
+                        training_metrics,
+                        version_metadata,
+                        new_samples,
+                        total_samples,
+                    )
 
                 # Pipeline completed successfully
                 logger.info(f"Job {job_id}: Pipeline completed successfully")
@@ -257,6 +266,26 @@ class LearningPipelineService:
                 "appendedToExisting": total_samples > new_samples,
             },
         }
+
+    def _format_evidence_results(
+        self, update_summary: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Format evidence update results to match the API response shape."""
+
+        return {
+            "modelVersion": "evidence_only",
+            "trainingMetrics": {
+                "totalLevels": 0,
+                "levelsSummary": {},
+            },
+            "trainingDataStats": update_summary,
+        }
+
+    def _try_load_dataset(self, catalog: Any, dataset_name: str) -> Any:
+        try:
+            return catalog.load(dataset_name)
+        except Exception:
+            return None
 
     def _build_run_params(
         self, session: KedroSession, context: Any

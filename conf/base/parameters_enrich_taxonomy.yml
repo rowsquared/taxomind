@@ -1,0 +1,18 @@
+# Parameters for the enrich_taxonomy pipeline
+# Uses taxonomy_key from main parameters.yml
+
+enrich_taxonomy:
+  # Similar labels configuration
+  k_similar_labels: 2
+
+  # LLM configuration
+  llm_config:
+    provider: "openai"  # "ollama" or "openai"
+    model: "gpt-4.1-mini"
+    ollama_url: "http://localhost:11434"
+    openai_base_url: "https://api.openai.com/v1"
+    timeout: 120
+
+  # Processing options
+  max_rows: null  # Set to int for dry run (e.g., 10)
+  apply_cleaned: true  # Overwrite definition/examples with cleaned versions

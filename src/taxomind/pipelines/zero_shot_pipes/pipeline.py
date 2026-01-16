@@ -22,6 +22,8 @@ def create_pipeline(**kwargs) -> Pipeline:
                 inputs={
                     "test_sentences": "zero_shot_inputs",
                     "model_name": "params:zero_shot.model_name",
+                    "cache_dir": "params:embedding.cache_dir",
+                    "local_files_only": "params:embedding.local_files_only",
                 },
                 outputs="zero_shot_sentence_embeddings",
                 name="compute_sentence_embeddings",

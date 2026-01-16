@@ -100,8 +100,15 @@ def embed_taxonomy(taxonomy: pd.DataFrame, model_name: str) -> Dict[str, pd.Data
     taxonomy_key = taxonomy["taxonomyKey"].iloc[0]
 
     texts = taxonomy["enriched_text"].fillna("").tolist()
-    embeddings = embedding_utils.embed_texts(texts, model_name=model_name)
-    taxonomy["embedding"] = embeddings
+    model = embedding_utils.load_embedding_model(model_name)
+    embeddings, _ = embedding_utils.encode_texts(
+        model,
+        texts,
+        embed_all=True,
+        batch_size=32,
+        show_progress_bar=False,
+    )
+    taxonomy["embedding"] = list(embeddings)
     taxonomy["embedding_model_name"] = model_name
     return {taxonomy_key: taxonomy}
 
@@ -171,10 +178,15 @@ def embed_full_paths(taxonomy: pd.DataFrame, model_name: str) -> Dict[str, pd.Da
     if taxonomy_key is None or pd.isna(taxonomy_key):
         raise ValueError("taxonomyKey is None in the paths DataFrame. Ensure build_full_paths sets it correctly.")
 
-    embeddings = embedding_utils.embed_texts(
-        taxonomy["path_text"].fillna("").tolist(), model_name=model_name
+    model = embedding_utils.load_embedding_model(model_name)
+    embeddings, _ = embedding_utils.encode_texts(
+        model,
+        taxonomy["path_text"].fillna("").tolist(),
+        embed_all=True,
+        batch_size=32,
+        show_progress_bar=False,
     )
-    taxonomy["embedding"] = embeddings
+    taxonomy["embedding"] = list(embeddings)
     taxonomy["embedding_model_name"] = model_name
     return {taxonomy_key: taxonomy}
 
@@ -259,13 +271,18 @@ def embed_flat_hierarchical_taxonomy(taxonomy: pd.DataFrame, model_name: str) ->
 
     # Embed the hierarchical labels
     texts = taxonomy["hierarchical_label"].fillna("").tolist()
-    embeddings = embedding_utils.embed_texts(texts, model_name=model_name)
+    model = embedding_utils.load_embedding_model(model_name)
+    embeddings, _ = embedding_utils.encode_texts(
+        model,
+        texts,
+        embed_all=True,
+        batch_size=32,
+        show_progress_bar=False,
+    )
 
-    taxonomy["hierarchical_embedding"] = embeddings
+    taxonomy["hierarchical_embedding"] = list(embeddings)
     taxonomy["hierarchical_embedding_model_name"] = model_name
 
     return {taxonomy_key: taxonomy}
-
-
 
 

@@ -2,45 +2,96 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
-from typing import List, Sequence
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
+
+import logging
 
 import numpy as np
-from txtai.embeddings import Embeddings
+from sentence_transformers import SentenceTransformer
 
 
-@lru_cache(maxsize=4)
-def _load_model(model_name: str) -> Embeddings:
-    """Load and cache multilingual embedding models per name."""
 
-    return Embeddings({"path": model_name})
+def load_embedding_model(
+    model_name: str,
+    cache_dir: Optional[str] = None,
+    local_files_only: bool = False,
+) -> SentenceTransformer:
+    """Load a SentenceTransformer model with safe remote code handling."""
+
+    logger = logging.getLogger(__name__)
+    logger.info("Loading embedding model: %s", model_name)
+
+    try:
+        kwargs = {}
+        if cache_dir:
+            kwargs["cache_folder"] = cache_dir
+        if local_files_only:
+            kwargs["local_files_only"] = True
+        model = SentenceTransformer(model_name, trust_remote_code=True, **kwargs)
+        logger.info("Model loaded with trust_remote_code=True: %s", model_name)
+    except Exception as exc:
+        logger.warning("Failed with trust_remote_code=True: %s", exc)
+        model = SentenceTransformer(model_name, **kwargs)
+        logger.info("Model loaded without trust_remote_code: %s", model_name)
+
+    return model
 
 
-def get_embedding_model(model_name: str) -> Embeddings:
-    """Return (and cache) the requested multilingual embedding model."""
+def apply_input_prefix(
+    texts: Iterable[str], input_prefix: Optional[str]
+) -> List[str]:
+    """Prefix non-empty inputs for models that require task labels."""
+    if not input_prefix:
+        return list(texts)
+    prefixed: List[str] = []
+    for text in texts:
+        text_stripped = str(text).strip()
+        if text_stripped:
+            prefixed.append(f"{input_prefix}{text_stripped}")
+        else:
+            prefixed.append(str(text))
+    return prefixed
 
-    return _load_model(model_name)
 
+def encode_texts(
+    embedding_model: Any,
+    texts: Sequence[str],
+    embed_all: bool,
+    input_prefix: Optional[str] = None,
+    batch_size: int = 32,
+    show_progress_bar: bool = True,
+) -> Tuple[np.ndarray, List[int]]:
+    """
+    Encode texts with a SentenceTransformer model.
 
-def _normalize(vectors: np.ndarray) -> np.ndarray:
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    return vectors / norms
+    Returns:
+        (embeddings, indices) where indices map embeddings to input rows.
+    """
+    text_list = list(texts)
 
-
-def embed_texts(texts: Sequence[str], model_name: str) -> List[List[float]]:
-    """Encode mixed-language text chunks using multilingual models."""
-
-    model = get_embedding_model(model_name)
-    if hasattr(model, "embed"):
-        vectors = model.embed(list(texts))
+    if embed_all:
+        embed_texts = apply_input_prefix(text_list, input_prefix)
+        indices = list(range(len(text_list)))
     else:
-        vectors = model.transform(list(texts))
-    vectors = _normalize(np.asarray(vectors, dtype=np.float32))
-    return vectors.tolist()
+        embed_texts = []
+        indices = []
+        for idx, text in enumerate(text_list):
+            text_stripped = str(text).strip()
+            if text_stripped:
+                embed_texts.append(text_stripped)
+                indices.append(idx)
+        embed_texts = apply_input_prefix(embed_texts, input_prefix)
 
+    if not embed_texts:
+        return np.empty((0, 0), dtype=np.float32), indices
 
-def embed_text(text: str, model_name: str) -> List[float]:
-    """Encode a single multilingual text sample."""
+    embeddings = embedding_model.encode(
+        embed_texts,
+        batch_size=batch_size,
+        show_progress_bar=show_progress_bar,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+    embeddings = np.asarray(embeddings, dtype=np.float32)
 
-    return embed_texts([text], model_name)[0]
+    return embeddings, indices

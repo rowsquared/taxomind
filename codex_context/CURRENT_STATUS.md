@@ -8,11 +8,12 @@ Date: 2026-01-13
 - True top-down routing (taxonomy-complete siblings)
 - Asymmetric stopping logic
 - Evidence blending (dynamic beta)
+- Scoped validation (HiRAG-style)
+- Inference pipeline wiring (batch nodes split per step)
 
 ## Pending
-- Scoped validation (HiRAG-style)
-- Pipeline wiring & parameter cleanup
 - End-to-end testing
+- Parameter cleanup/normalization (optional)
 
 ## Known Focus Areas
 - Validate "Education" ambiguity
