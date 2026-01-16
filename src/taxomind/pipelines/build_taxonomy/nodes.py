@@ -71,7 +71,7 @@ def load_taxonomy_from_request(
         taxonomy_request_files, taxonomy_key
     )
 
-    # Parse JSON structure (from taxonomy_pipes/nodes.py logic)
+    # Parse JSON structure 
     if not taxonomy_dict:
         raise ValueError("taxonomy payload is required")
 
