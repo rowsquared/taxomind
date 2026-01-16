@@ -43,6 +43,8 @@ Rule:
 - At each parent, ambiguity is computed over **all** children in `taxonomy_graph[parent]`.
 - Routing remains top-down and level-by-level.
 - Ancestor evidence may be used as a *veto* but not as the primary descent signal.
+- Parent competitiveness veto can be toggled with `enable_parent_veto`.
+- Optional candidate gating: if `enable_candidate_gating` and best child ∉ V → STOP; if disabled, descend using best child within V.
 
 ## Scoped validation (HiRAG-style)
 - Compare top-down result TD to best leaf L* in candidate set V.

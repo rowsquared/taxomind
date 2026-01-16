@@ -21,6 +21,11 @@ To support Module 3 without schema migrations, initialize:
 - `evidence_count` = 0
 - `evidence_last_updated` = None (optional)
 
+Optional snapshot fields (if you want rollback/inspect previous state):
+- `last_evidence_centroid` = None
+- `last_evidence_count` = 0
+- `last_evidence_last_updated` = None
+
 ## Root normalization
 Normalize any missing/empty parentCode to `__root__` during preparation.
 

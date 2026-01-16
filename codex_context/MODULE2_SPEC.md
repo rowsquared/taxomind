@@ -70,6 +70,10 @@ Stopping logic (asymmetric):
    - If best_child_score - second_best < min_gap → STOP
 2. **Parent competitiveness (veto)**
    - If parent_score + margin ≥ best_child_score → STOP
+   - Can be disabled via `enable_parent_veto=false`
+3. **Candidate gating (optional safety)**
+   - If `enable_candidate_gating=true` and best child ∉ V → STOP
+   - If disabled, descend using best child within V
 
 If descending:
 - Move to best child
