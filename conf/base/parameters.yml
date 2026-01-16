@@ -28,6 +28,12 @@ embedding_examples:
   view_name: "examples"
   log_counts: true
 
+embedding_negative_examples:
+  text_col: "negative_examples"
+  output_col: "embedding_negative_examples"
+  view_name: "negative_examples"
+  log_counts: true
+
 zero_shot:
   topdown_k: 1
   bottomup_k: 1

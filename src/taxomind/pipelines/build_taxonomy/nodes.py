@@ -126,8 +126,19 @@ def normalize_prototype_views(taxonomy_raw: pd.DataFrame) -> pd.DataFrame:
     df["code"] = df["code"].apply(taxonomy_utils.normalize_code)
     df["parentCode"] = df["parentCode"].apply(taxonomy_utils.normalize_parent)
     df["label"] = df["label"].apply(taxonomy_utils.normalize_text)
-    df["examples"] = df["examples"].apply(taxonomy_utils.normalize_text)
     df["definition"] = df["definition"].apply(taxonomy_utils.normalize_text)
+    if "positive_examples" in df.columns:
+        df["examples"] = df["positive_examples"].apply(
+            taxonomy_utils.normalize_text
+        )
+    elif "examples" in df.columns:
+        df["examples"] = df["examples"].apply(taxonomy_utils.normalize_text)
+    else:
+        df["examples"] = None
+    if "negative_examples" in df.columns:
+        df["negative_examples"] = df["negative_examples"].apply(
+            taxonomy_utils.normalize_text
+        )
 
     return df
 
@@ -164,6 +175,16 @@ def build_text_embeddings(
     embed_all = embedding_spec.get("embed_all", False)
     warn_on_empty = embedding_spec.get("warn_on_empty", False)
     log_counts = embedding_spec.get("log_counts", False)
+
+    if text_col not in df.columns:
+        logger.warning(
+            "Missing text column '%s' for view '%s'; setting '%s' to None",
+            text_col,
+            view_name,
+            output_col,
+        )
+        df[output_col] = None
+        return df
 
     texts = df[text_col].fillna("").astype(str)
 

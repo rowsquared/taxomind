@@ -22,8 +22,9 @@ def create_pipeline(**kwargs) -> Pipeline:
     4. Creates label embeddings (primary anchor)
     5. Creates definition embeddings (secondary semantic view)
     6. Creates examples embeddings (tertiary semantic view, optional)
-    7. Adds embedding metadata (model name, dimension)
-    8. Saves taxonomy index with multi-view embeddings
+    7. Creates negative examples embeddings (optional, stored only)
+    8. Adds embedding metadata (model name, dimension)
+    9. Saves taxonomy index with multi-view embeddings
 
     Returns:
         Pipeline with 7 nodes for multi-view taxonomy index building
@@ -86,8 +87,22 @@ def create_pipeline(**kwargs) -> Pipeline:
                 name="build_examples_embeddings",
             ),
             node(
+                func=nodes.build_text_embeddings,
+                inputs=[
+                    "taxonomy_with_examples_embeddings",
+                    "embedding_model",
+                    "params:embedding_negative_examples",
+                    "params:embedding_prefix.document",
+                ],
+                outputs="taxonomy_with_negative_examples_embeddings",
+                name="build_negative_examples_embeddings",
+            ),
+            node(
                 func=nodes.add_embedding_metadata,
-                inputs=["taxonomy_with_examples_embeddings", "params:model_name"],
+                inputs=[
+                    "taxonomy_with_negative_examples_embeddings",
+                    "params:model_name",
+                ],
                 outputs="taxonomy_embeddings",
                 name="add_embedding_metadata",
             ),
@@ -113,8 +128,9 @@ def create_pipeline_from_request(**kwargs) -> Pipeline:
     5. Creates label embeddings (primary anchor)
     6. Creates definition embeddings (secondary semantic view)
     7. Creates examples embeddings (tertiary semantic view, optional)
-    8. Adds embedding metadata (model name, dimension)
-    9. Saves taxonomy index with multi-view embeddings
+    8. Creates negative examples embeddings (optional, stored only)
+    9. Adds embedding metadata (model name, dimension)
+    10. Saves taxonomy index with multi-view embeddings
 
     Returns:
         Pipeline with 7 nodes for multi-view taxonomy index building from JSON
@@ -177,8 +193,22 @@ def create_pipeline_from_request(**kwargs) -> Pipeline:
                 name="build_examples_embeddings",
             ),
             node(
+                func=nodes.build_text_embeddings,
+                inputs=[
+                    "taxonomy_with_examples_embeddings",
+                    "embedding_model",
+                    "params:embedding_negative_examples",
+                    "params:embedding_prefix.document",
+                ],
+                outputs="taxonomy_with_negative_examples_embeddings",
+                name="build_negative_examples_embeddings",
+            ),
+            node(
                 func=nodes.add_embedding_metadata,
-                inputs=["taxonomy_with_examples_embeddings", "params:model_name"],
+                inputs=[
+                    "taxonomy_with_negative_examples_embeddings",
+                    "params:model_name",
+                ],
                 outputs="taxonomy_embeddings",
                 name="add_embedding_metadata",
             ),
