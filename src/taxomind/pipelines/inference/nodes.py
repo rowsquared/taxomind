@@ -236,6 +236,7 @@ def build_retrieval_index(taxonomy_df: pd.DataFrame) -> Dict[str, Any]:
         - 'codes': List[str] of node codes (aligned with embeddings)
         - 'code_to_pos': Dict[code -> index] for O(1) lookup
         - 'code_to_parent': Dict[code -> parent_code] for ancestor closure
+        - 'code_to_children': Dict[parent_code -> List[child_code]] for sibling completion
         - 'method': 'label_only' (for tracking)
 
     Spec Reference:
@@ -254,13 +255,16 @@ def build_retrieval_index(taxonomy_df: pd.DataFrame) -> Dict[str, Any]:
     # Build O(1) lookup maps
     code_to_pos = {code: i for i, code in enumerate(codes)}
 
-    # Build parent mapping for ancestor closure
+    # Build parent/child mapping for ancestor closure + sibling completion
     code_to_parent = {}
+    code_to_children = defaultdict(list)
     for _, row in taxonomy_df.iterrows():
         parent = row["parentCode"]
         if pd.isna(parent) or parent == "":
             parent = "__root__"
-        code_to_parent[row["code"]] = parent
+        code = row["code"]
+        code_to_parent[code] = parent
+        code_to_children[parent].append(code)
 
     # Verify L2 normalization (required for cosine similarity)
     norms = np.linalg.norm(embeddings, axis=1)
@@ -278,6 +282,7 @@ def build_retrieval_index(taxonomy_df: pd.DataFrame) -> Dict[str, Any]:
         "codes": codes,
         "code_to_pos": code_to_pos,
         "code_to_parent": code_to_parent,
+        "code_to_children": dict(code_to_children),
         "method": "label_only",
     }
 
@@ -403,6 +408,7 @@ def compute_multiview_score(
        - beta_n = min(k / (k + tau), max_beta) where k = evidence_count
        - E_label_eff = (1-beta_n) * E_label + beta_n * E_evidence
     2. Compute similarities: sim_label, sim_def, sim_ex, sim_emp
+       - Missing definition/examples/evidence are ignored in max pooling.
     3. Apply short-query rule (≤2 tokens): max(sim_label, sim_emp)
     4. Default: max(sim_label, sim_def, sim_ex, sim_emp)
 
@@ -457,12 +463,12 @@ def compute_multiview_score(
     else:
         # No evidence -> use pure label
         E_label_eff = E_label
-        sim_emp = 0.0
+        sim_emp = float("-inf")
 
     # Step 2: Compute view similarities
     sim_label = float(np.dot(query_embedding, E_label_eff))
-    sim_def = float(np.dot(query_embedding, E_def)) if E_def is not None else 0.0
-    sim_ex = float(np.dot(query_embedding, E_ex)) if E_ex is not None else 0.0
+    sim_def = float(np.dot(query_embedding, E_def)) if E_def is not None else float("-inf")
+    sim_ex = float(np.dot(query_embedding, E_ex)) if E_ex is not None else float("-inf")
 
     # Step 3: Apply short-query rule (≤N tokens)
     tokens = query_text.split()
@@ -588,19 +594,21 @@ def retrieve_candidates(
     beam_count: int = 2,
 ) -> Dict[str, Any]:
     """
-    Retrieve and refine candidates using structural closure and beam selection.
+    Retrieve and refine candidates using structural closure, sibling completion,
+    and beam selection.
 
     Process (Spec-Aligned):
     1. Retrieve top-K by label similarity (fast recall)
     2. Compute ancestor closure A (paths to roots)
-    3. Form candidate set V = R ∪ A (for Variant 2: taxonomy-complete routing)
-    4. Aggregate evidence by root (L1) for beam selection
-    5. Select top-B root beams (prevents semantic dilution)
+    3. Complete siblings S for ambiguity checks: children(A ∪ {__root__})
+    4. Form candidate set V = R ∪ A ∪ S (induced subgraph)
+    5. Aggregate evidence by root (L1) for beam selection
+    6. Select top-B root beams (prevents semantic dilution)
 
-    Variant 2: Taxonomy-Complete Routing
-    - Only requires ancestor closure (not sibling expansion)
-    - Routing scores full taxonomy_graph[parent] at each step
-    - Ensures path connectivity (retrieved nodes can always be reached from roots)
+    Variant 2: Induced Subgraph Routing
+    - Ancestor closure ensures path connectivity
+    - Sibling completion ensures ambiguity checks see full local context
+    - Routing scores only children(parent) ∩ V at each step
 
     Args:
         query_embedding: L2-normalized query embedding
@@ -615,12 +623,13 @@ def retrieve_candidates(
         - 'retrieved_scores': Dict[code -> similarity_score]
         - 'V_codes': set of candidate codes (R ∪ A)
         - 'ancestors': set of ancestor codes (A)
+        - 'siblings': set of sibling codes (S)
         - 'beam_roots': List[str] of selected L1 root codes
         - 'root_evidence': Dict[root -> List[score]] for beam selection
 
     Spec Reference:
         Module 2 — Inference, Step 6: Retrieve candidates
-        Structural refinement: R ∪ A (ancestor closure)
+        Structural refinement: R ∪ A ∪ S (ancestor + sibling completion)
         Beam selection: Use retrieval evidence as prior
 
     Failure Mode Prevention:
@@ -633,6 +642,7 @@ def retrieve_candidates(
     label_embeddings = retrieval_index["embeddings"]
     codes = retrieval_index["codes"]
     code_to_parent = retrieval_index["code_to_parent"]
+    code_to_children = retrieval_index.get("code_to_children", {})
 
     # Step 1: Retrieve top-K by label similarity (exact search)
     similarities = np.dot(label_embeddings, query_embedding)
@@ -659,14 +669,23 @@ def retrieve_candidates(
                 A.add(parent)
             current = parent
 
-    # Step 3: Form candidate set V = R ∪ A
-    V = R | A
+    # Step 3: Sibling completion S = children(A ∪ {__root__})
+    S = set()
+    parent_set = set(A)
+    parent_set.add("__root__")
+    for parent in parent_set:
+        for child in code_to_children.get(parent, []):
+            S.add(child)
+
+    # Step 4: Form candidate set V = R ∪ A ∪ S
+    V = R | A | S
 
     logger.info(
-        f"Structural closure: |R|={len(R)}, |A|={len(A)}, |V|={len(V)}"
+        f"Structural closure: |R|={len(R)}, |A|={len(A)}, "
+        f"|S|={len(S)}, |V|={len(V)}"
     )
 
-    # Step 4: Aggregate evidence by root (L1) for beam selection
+    # Step 5: Aggregate evidence by root (L1) for beam selection
     # Helper: Get L1 ancestor (root) for a code
     def get_root_ancestor(code: str) -> str:
         """Traverse to L1 root."""
@@ -689,7 +708,7 @@ def retrieve_candidates(
         root = get_root_ancestor(code)
         root_evidence[root].append(retrieved_scores[code])
 
-    # Step 5: Select top-B roots by evidence mass (sum of scores)
+    # Step 6: Select top-B roots by evidence mass (sum of scores)
     beam_roots_ranked = sorted(
         root_evidence.items(),
         key=lambda x: sum(x[1]),  # Sum of retrieval scores
@@ -708,6 +727,7 @@ def retrieve_candidates(
         "retrieved_scores": retrieved_scores,
         "V_codes": V,
         "ancestors": A,
+        "siblings": S,
         "beam_roots": beam_roots,
         "root_evidence": dict(root_evidence),
     }
@@ -769,6 +789,7 @@ def validate_prediction_scoped(
     evidence_max_beta: float = 0.8,
     validation_threshold: float = 0.05,
     validation_override_margin: Optional[float] = None,
+    validation_stability_margin: Optional[float] = None,
     short_query_tokens: int = 2,
 ) -> Dict[str, Any]:
     """
@@ -795,9 +816,10 @@ def validate_prediction_scoped(
             "validation_status": "INSUFFICIENT_NO_LEAVES",
             "validation_override_code": None,
             "validation_margin": None,
+            "validation_stability_gap": None,
         }
 
-    # Score leaves in V to find L*
+    # Score leaves in V to find L* and stability gap.
     def score_node(code: str) -> float:
         return compute_multiview_score(
             query_embedding=query_embedding,
@@ -808,9 +830,29 @@ def validate_prediction_scoped(
             evidence_max_beta=evidence_max_beta,
             short_query_tokens=short_query_tokens,
         )
-
-    l_star = max(leaves_in_v, key=score_node)
-    l_star_score = score_node(l_star)
+    leaf_scores = {code: score_node(code) for code in leaves_in_v}
+    if validation_stability_margin is not None:
+        logger.info(
+            "Validation stability check: leaves=%d, stability_margin=%.3f",
+            len(leaf_scores),
+            validation_stability_margin,
+        )
+    sorted_leaves = sorted(
+        leaf_scores.items(), key=lambda x: x[1], reverse=True
+    )
+    l_star, l_star_score = sorted_leaves[0]
+    second_leaf_score = sorted_leaves[1][1] if len(sorted_leaves) > 1 else None
+    stability_gap = (
+        l_star_score - second_leaf_score
+        if second_leaf_score is not None
+        else None
+    )
+    stability_ok = True
+    if validation_stability_margin is not None:
+        stability_ok = (
+            stability_gap is not None
+            and stability_gap >= validation_stability_margin
+        )
 
     # If TD is root, L* is within subtree by definition
     if td_code == "__root__":
@@ -820,6 +862,7 @@ def validate_prediction_scoped(
             "validation_status": "CONSISTENT",
             "validation_override_code": None,
             "validation_margin": None,
+            "validation_stability_gap": stability_gap,
         }
 
     # Collect leaves under TD subtree within V
@@ -833,6 +876,7 @@ def validate_prediction_scoped(
             "validation_status": "INSUFFICIENT_NO_SUBTREE",
             "validation_override_code": None,
             "validation_margin": None,
+            "validation_stability_gap": stability_gap,
         }
 
     leaves_sub = [
@@ -846,10 +890,11 @@ def validate_prediction_scoped(
             "validation_status": "INSUFFICIENT_NO_SUB_LEAVES",
             "validation_override_code": None,
             "validation_margin": None,
+            "validation_stability_gap": stability_gap,
         }
 
-    l_sub = max(leaves_sub, key=score_node)
-    l_sub_score = score_node(l_sub)
+    l_sub = max(leaves_sub, key=lambda code: leaf_scores.get(code, score_node(code)))
+    l_sub_score = leaf_scores.get(l_sub, score_node(l_sub))
 
     if l_star == l_sub:
         return {
@@ -858,16 +903,18 @@ def validate_prediction_scoped(
             "validation_status": "CONSISTENT",
             "validation_override_code": None,
             "validation_margin": None,
+            "validation_stability_gap": stability_gap,
         }
 
     margin = l_star_score - l_sub_score
-    if margin > validation_threshold:
+    if margin > validation_threshold and stability_ok:
         return {
             "final_code": l_star,
             "final_score": l_star_score,
             "validation_status": "OVERRIDE",
             "validation_override_code": l_star,
             "validation_margin": margin,
+            "validation_stability_gap": stability_gap,
         }
 
     return {
@@ -876,6 +923,7 @@ def validate_prediction_scoped(
         "validation_status": "CONFLICT",
         "validation_override_code": None,
         "validation_margin": margin,
+        "validation_stability_gap": stability_gap,
     }
 
 
@@ -893,7 +941,6 @@ def route_query_topdown(
     min_descent_gap: float = 0.05,
     parent_veto_margin: float = 0.05,
     enable_parent_veto: bool = True,
-    enable_candidate_gating: bool = True,
     evidence_tau: float = 10.0,
     evidence_max_beta: float = 0.8,
     short_query_tokens: int = 2,
@@ -903,19 +950,17 @@ def route_query_topdown(
     """
     True top-down routing using taxonomy edges, level by level.
 
-    Spec-Aligned Variant 2: Taxonomy-Complete Sibling Comparison
+    Spec-Aligned Variant 2: Induced Subgraph Top-Down
     - Starts at root (or beam root if specified)
-    - Scores ONLY children of current parent (level-by-level)
+    - Scores ONLY children of current parent that are in V
     - Cannot skip levels or jump to L4
-    - Sibling comparison uses FULL taxonomy_graph[parent] (all children)
     - Uses multi-view scoring (label + definition + examples + evidence)
 
     Routing Logic:
     1. Start at beam_root (if specified) or __root__
     2. At each level:
-       a. Get ALL children of current parent from taxonomy_graph
-       b. Filter to candidates within V (candidate set with ancestor closure)
-       c. Score children using compute_multiview_score()
+       a. Get children of current parent that are in V
+       b. Score children using compute_multiview_score()
        d. Check stopping criteria (asymmetric):
           - Sibling ambiguity: gap < min_descent_gap
           - Parent competitive: parent_score + margin >= child_score
@@ -933,7 +978,6 @@ def route_query_topdown(
         min_descent_gap: Sibling separation threshold (default 0.05)
         parent_veto_margin: Parent competitiveness margin (default 0.05)
         enable_parent_veto: Toggle for parent competitiveness stop
-        enable_candidate_gating: Toggle for candidate-set gating stop
         evidence_tau: Evidence confidence threshold (default 10.0)
         evidence_max_beta: Evidence weight cap (default 0.8)
         max_depth: Optional max level to descend
@@ -976,7 +1020,6 @@ def route_query_topdown(
     stopping_reason = "unknown"
     ambiguous = False
     alternatives = []
-    last_best_child = None
 
     logger.info(
         f"Starting top-down routing from {current_parent}, "
@@ -985,7 +1028,7 @@ def route_query_topdown(
 
     # Iterative level-by-level descent
     while True:
-        # Get ALL children of current parent (taxonomy-complete)
+        # Children always come from taxonomy_graph, then filter by membership in V.
         all_children = taxonomy_graph.get(current_parent, [])
 
         if not all_children:
@@ -1007,6 +1050,8 @@ def route_query_topdown(
                 "scores": {},
                 "best_child": None,
                 "best_score": None,
+                "second_best_child": None,
+                "second_best_score": None,
                 "sibling_gap": None,
                 "decision": "stop_no_candidate_children",
             })
@@ -1017,7 +1062,7 @@ def route_query_topdown(
             stopping_reason = f"max_depth_reached (depth={max_depth})"
             break
 
-        # Score ALL taxonomy children using multi-view scoring
+        # Score induced candidate children using multi-view scoring
         child_scores = {
             child: compute_multiview_score(
                 query_embedding=query_embedding,
@@ -1028,7 +1073,7 @@ def route_query_topdown(
                 evidence_max_beta=evidence_max_beta,
                 short_query_tokens=short_query_tokens,
             )
-            for child in all_children
+            for child in candidate_children
         }
 
         # Sort by score (descending)
@@ -1036,68 +1081,21 @@ def route_query_topdown(
             child_scores.items(), key=lambda x: x[1], reverse=True
         )
         best_child, best_score = sorted_children[0]
-        last_best_child = best_child
 
         # Compute sibling separation
         if len(sorted_children) > 1:
-            second_score = sorted_children[1][1]
+            second_child, second_score = sorted_children[1]
             sibling_gap = best_score - second_score
         else:
+            second_child, second_score = None, None
             sibling_gap = float('inf')  # Only one child
-
-        used_candidate_override = False
-        sorted_candidates = None
-        global_best_child = best_child
-        global_best_score = best_score
-        global_sibling_gap = sibling_gap
-
-        if best_child not in V_codes:
-            if enable_candidate_gating:
-                stopping_reason = "best_child_not_in_candidates"
-                ambiguous = True
-                alternatives = [
-                    code for code, _ in sorted_children if code in V_codes
-                ][:3]
-                if not alternatives:
-                    alternatives = [best_child]
-                routing_trace.append({
-                    "level": current_level + 1,
-                    "parent": current_parent,
-                    "all_children_count": len(all_children),
-                    "candidate_children_count": len(candidate_children),
-                    "candidate_children": candidate_children,
-                    "scores": child_scores,
-                    "best_child": best_child,
-                    "best_score": best_score,
-                    "sibling_gap": sibling_gap,
-                    "decision": "stop_best_child_not_in_candidates",
-                })
-                break
-
-            candidate_scores = {
-                child: child_scores[child] for child in candidate_children
-            }
-            sorted_candidates = sorted(
-                candidate_scores.items(), key=lambda x: x[1], reverse=True
-            )
-            best_child, best_score = sorted_candidates[0]
-            if len(sorted_candidates) > 1:
-                sibling_gap = best_score - sorted_candidates[1][1]
-            else:
-                sibling_gap = float('inf')
-            used_candidate_override = True
 
         # Asymmetric stopping: Check sibling ambiguity
         if sibling_gap < min_descent_gap:
             # Siblings too close - stop at parent (prevents over-specification)
             stopping_reason = "sibling_ambiguity"
             ambiguous = True
-            alt_source = (
-                sorted_candidates
-                if used_candidate_override and sorted_candidates
-                else sorted_children
-            )
-            alternatives = [code for code, _ in alt_source[:3]]
+            alternatives = [code for code, _ in sorted_children[:3]]
             trace_entry = {
                 "level": current_level + 1,
                 "parent": current_parent,
@@ -1107,13 +1105,11 @@ def route_query_topdown(
                 "scores": child_scores,
                 "best_child": best_child,
                 "best_score": best_score,
+                "second_best_child": second_child,
+                "second_best_score": second_score,
                 "sibling_gap": sibling_gap,
                 "decision": "stop_sibling_ambiguity",
             }
-            if used_candidate_override:
-                trace_entry["global_best_child"] = global_best_child
-                trace_entry["global_best_score"] = global_best_score
-                trace_entry["global_sibling_gap"] = global_sibling_gap
             routing_trace.append(trace_entry)
             break
 
@@ -1149,13 +1145,11 @@ def route_query_topdown(
                     "scores": scores_with_parent,
                     "best_child": best_child,
                     "best_score": best_score,
+                    "second_best_child": second_child,
+                    "second_best_score": second_score,
                     "sibling_gap": sibling_gap,
                     "decision": "stop_parent_competitive",
                 }
-                if used_candidate_override:
-                    trace_entry["global_best_child"] = global_best_child
-                    trace_entry["global_best_score"] = global_best_score
-                    trace_entry["global_sibling_gap"] = global_sibling_gap
                 routing_trace.append(trace_entry)
                 break
 
@@ -1169,13 +1163,11 @@ def route_query_topdown(
             "scores": child_scores,
             "best_child": best_child,
             "best_score": best_score,
+            "second_best_child": second_child,
+            "second_best_score": second_score,
             "sibling_gap": sibling_gap,
             "decision": "descend",
         }
-        if used_candidate_override:
-            trace_entry["global_best_child"] = global_best_child
-            trace_entry["global_best_score"] = global_best_score
-            trace_entry["global_sibling_gap"] = global_sibling_gap
         routing_trace.append(trace_entry)
 
         # Descend to best child
@@ -1280,6 +1272,7 @@ def format_predictions(
     final_score = routing_result.get("final_score", routing_result["score"])
     validation_status = routing_result.get("validation_status", "UNVALIDATED")
     validation_override_code = routing_result.get("validation_override_code")
+    validation_stability_gap = routing_result.get("validation_stability_gap")
 
     if final_code == "__root__":
         predicted_label = "__root__"
@@ -1328,6 +1321,7 @@ def format_predictions(
         "validation_status": validation_status,
         "validation_override_code": validation_override_code,
         "validation_margin": routing_result.get("validation_margin"),
+        "validation_stability_gap": validation_stability_gap,
     }
 
     logger.info(
@@ -1401,7 +1395,6 @@ def batch_route_topdown(
     min_descent_gap: float = 0.05,
     parent_veto_margin: float = 0.05,
     enable_parent_veto: bool = True,
-    enable_candidate_gating: bool = True,
     evidence_tau: float = 10.0,
     evidence_max_beta: float = 0.8,
     short_query_tokens: int = 2,
@@ -1417,7 +1410,6 @@ def batch_route_topdown(
         min_descent_gap: Sibling separation threshold
         parent_veto_margin: Parent competitiveness margin
         enable_parent_veto: Toggle for parent competitiveness stop
-        enable_candidate_gating: Toggle for candidate-set gating stop
         evidence_tau: Evidence confidence threshold
         evidence_max_beta: Evidence weight cap
         short_query_tokens: Token threshold for short-query rule
@@ -1466,7 +1458,6 @@ def batch_route_topdown(
                         min_descent_gap=min_descent_gap,
                         parent_veto_margin=parent_veto_margin,
                         enable_parent_veto=enable_parent_veto,
-                        enable_candidate_gating=enable_candidate_gating,
                         evidence_tau=evidence_tau,
                         evidence_max_beta=evidence_max_beta,
                         short_query_tokens=short_query_tokens,
@@ -1504,6 +1495,7 @@ def batch_validate_scoped(
     evidence_max_beta: float = 0.8,
     validation_threshold: float = 0.05,
     validation_override_margin: Optional[float] = None,
+    validation_stability_margin: Optional[float] = None,
     short_query_tokens: int = 2,
 ) -> pd.DataFrame:
     """
@@ -1518,6 +1510,7 @@ def batch_validate_scoped(
         evidence_max_beta: Evidence weight cap
         validation_threshold: Override threshold for scoped validation
         validation_override_margin: Optional override margin
+        validation_stability_margin: Optional stability margin (L* gap vs second leaf)
         short_query_tokens: Token threshold for short-query rule
 
     Returns:
@@ -1556,6 +1549,7 @@ def batch_validate_scoped(
                 evidence_max_beta=evidence_max_beta,
                 validation_threshold=validation_threshold,
                 validation_override_margin=validation_override_margin,
+                validation_stability_margin=validation_stability_margin,
                 short_query_tokens=short_query_tokens,
             )
 
@@ -1624,6 +1618,7 @@ def format_predictions_batch(
                 "validation_status": None,
                 "validation_override_code": None,
                 "validation_margin": None,
+                "validation_stability_gap": None,
             })
             continue
 
@@ -1643,6 +1638,7 @@ def format_predictions_batch(
                 "validation_status": None,
                 "validation_override_code": None,
                 "validation_margin": None,
+                "validation_stability_gap": None,
             })
             continue
 
@@ -1666,6 +1662,7 @@ def format_predictions_batch(
             "validation_status": prediction["validation_status"],
             "validation_override_code": prediction["validation_override_code"],
             "validation_margin": prediction["validation_margin"],
+            "validation_stability_gap": prediction["validation_stability_gap"],
         })
 
         if i % 10 == 0 or i == total:
@@ -1692,7 +1689,6 @@ def batch_inference(
     min_descent_gap: float = 0.05,
     parent_veto_margin: float = 0.05,
     enable_parent_veto: bool = True,
-    enable_candidate_gating: bool = True,
     evidence_tau: float = 10.0,
     evidence_max_beta: float = 0.8,
     short_query_tokens: int = 2,
@@ -1717,7 +1713,6 @@ def batch_inference(
         min_descent_gap: Sibling separation threshold
         parent_veto_margin: Parent competitiveness margin
         enable_parent_veto: Toggle for parent competitiveness stop
-        enable_candidate_gating: Toggle for candidate-set gating stop
         beta: Evidence weight
         short_query_tokens: Token threshold for short-query rule
         validation_threshold: Override threshold for scoped validation
@@ -1763,7 +1758,6 @@ def batch_inference(
         min_descent_gap=min_descent_gap,
         parent_veto_margin=parent_veto_margin,
         enable_parent_veto=enable_parent_veto,
-        enable_candidate_gating=enable_candidate_gating,
         evidence_tau=evidence_tau,
         evidence_max_beta=evidence_max_beta,
         short_query_tokens=short_query_tokens,

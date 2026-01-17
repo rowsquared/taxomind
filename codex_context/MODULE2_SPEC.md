@@ -1,115 +1,109 @@
-# Module 2 — Inference Specification
+# Module 2 — Inference (Zero‑shot + Incremental)
 
-This document defines the REQUIRED behavior of inference.
+This spec defines the intended behavior of Module 2 **independent of code**.
 
----
+## What Module 2 must do
+For each query:
+1. retrieve a small candidate set (recall)
+2. refine candidates (semantic + structural)
+3. route top‑down with explicit stopping
+4. optionally validate scoped to candidates (HiRAG‑style)
+5. return an explainable result (path, scores, stopping reason)
 
-## 2.1 Candidate Retrieval (Recall)
-
-Purpose: high recall, stable, fast.
-
-- Use label embeddings only.
-- Exact or ANN dot-product search.
-- Retrieve top-K nodes (K configurable).
-- Retrieved nodes may be at any level.
-
----
-
-## 2.2 Structural Refinement (Semantic + Structural)
-
-After retrieval:
-
-- Compute ancestor closure:
-  - A = all ancestors of retrieved nodes up to roots
-- Candidate set:
-  - V = Retrieved ∪ Ancestors
-
-Sibling expansion is NOT required here.
-
-Optional:
-- Aggregate retrieved evidence by L1 root
-- Use as beam prior (NOT routing signal)
+The taxonomy is a tree/forest with columns:
+`level, code, parentCode, label, definition, examples`
+`definition` is mandatory, `examples` is optional.
 
 ---
 
-## 2.3 Multi-View Scoring
-
-For any node n, compute:
-
-- sim_label
-- sim_definition
-- sim_examples
-- sim_evidence (if available)
-
-Scoring rule:
-
-- For short queries (≤2 tokens):
-  - score(n) = max(sim_label, sim_evidence)
-- Otherwise:
-  - score(n) = max(sim_label, sim_definition, sim_examples, sim_evidence)
-
-Weighted sums are allowed but NOT required.
+## Core principles
+- **Non‑leaf outputs are valid**: the system must be able to stop early.
+- **Retrieval is not classification**: retrieval provides recall; decisions use hierarchical logic.
+- **Sibling ambiguity must be measured on complete sibling sets** (per visited parent), otherwise stopping is unreliable.
+- **Ancestor evidence aggregation is allowed only as a secondary signal** (beam/priors/veto), never as the sole descent driver.
 
 ---
 
-## 2.4 Hierarchical Routing (Top-Down)
-
-Routing MUST be level-by-level.
-
-Algorithmic constraints:
-
-- Start at root (or beam root).
-- At each step:
-  - Consider ALL children of current parent
-  - Score each child using multi-view scoring
-- Decide STOP vs DESCEND explicitly.
-
-Stopping logic (asymmetric):
-
-1. **Sibling ambiguity**
-   - If best_child_score - second_best < min_gap → STOP
-2. **Parent competitiveness (veto)**
-   - If parent_score + margin ≥ best_child_score → STOP
-   - Can be disabled via `enable_parent_veto=false`
-3. **Candidate gating (optional safety)**
-   - If `enable_candidate_gating=true` and best child ∉ V → STOP
-   - If disabled, descend using best child within V
-
-If descending:
-- Move to best child
-- Repeat until stop or leaf
+## Step 2.1 Candidate retrieval (recall)
+- Use a stable, short representation for fast retrieval (typically `embedding_label`).
+- Retrieve top‑K nodes globally (any level).
+- Keep retrieval scores for later diagnostics and (optionally) beam/root priors.
 
 ---
 
-## 2.5 Scoped Validation (HiRAG-style)
+## Step 2.2 Candidate refinement (semantic + structural)
 
-After routing:
+### Semantic refinement
+- Re‑score retrieved nodes using **multi‑view scoring** over:
+  - label
+  - definition
+  - examples (if present)
+  - evidence centroid (if present)
 
-- Let TD = top-down result
-- Let L* = best leaf in V (candidate set)
-- Let L_sub = best leaf under TD (if exists)
+### Structural refinement (critical)
+Build an induced candidate set **V** that guarantees routing can:
+- traverse from roots to candidates (connectivity)
+- compute ambiguity at each parent using the **full sibling set under that parent**
 
-Decision:
+To do this:
+1. **Ancestor closure**: include all ancestors for each retrieved node up to `__root__`.
+2. **Sibling completion (within induced subgraph)**: for every ancestor parent on those paths (including `__root__`), include **all of its children**.
 
-- If L* outside TD subtree AND
-  score(L*) - score(L_sub) > threshold:
-    → OVERRIDE to L*
-- Else:
-    → KEEP TD
+This yields the induced set:
+- `R` = retrieved codes
+- `A` = ancestors(R)
+- `S` = children(A ∪ {__root__})
+- `V = R ∪ A ∪ S`
 
-Validation is scoped to V.
-No full taxonomy scans.
+Clarification (matches your “Variant 2” intent):
+- Once root `2` is selected/considered, ambiguity is computed across **all children of `2`**.
+- We do **not** require scanning siblings from unrelated roots that are not in the induced set.
+
+### Optional: beam roots (anti‑dilution)
+If retrieval returns mixed topics (e.g., “Legislators” also retrieves “Lawyers/Judges/Economists”), allow a small **beam over L1 roots**:
+- aggregate evidence per root from retrieved items
+- keep top‑B roots
+- route each root beam independently and select the best final output
 
 ---
 
-## 2.6 Outputs & Explainability
+## Step 2.3 Hierarchical routing with explicit stopping
+Induced set with sibling completion:
+- `S = children(A ∪ {__root__})`
+- `V = R ∪ A ∪ S`
 
-Return:
+Route **top‑down** over `V`:
+- start at `__root__` (or at each beam root)
+- at each parent, score **all candidate children** = `children(parent) ∩ V`
+- decide **STOP vs DESCEND** explicitly
 
-- final_code
-- path
-- score
-- stopping_reason
-- ambiguous flag
-- alternatives (if ambiguous)
-- routing_trace
+Stopping logic is asymmetric:
+- **Sibling separation drives descent** (need a clear best child vs runner‑up)
+- **Parent competitiveness acts as a veto/brake** (optional via `enable_parent_veto`)
+
+This directly targets:
+- over‑specification (near‑tied children → stop)
+- under‑specification (clear winner → descend)
+
+---
+
+## Step 2.4 Scoped validation (HiRAG‑style)
+After top‑down routing returns `TD`:
+- validate against strong evidence elsewhere in `V` (no full scans)
+- detect wrong‑branch cases (TD subtree vs best leaf outside)
+- decide: CONSISTENT / OVERRIDE / CONFLICT
+
+Optional stability guard:
+- require `score(L*) - score(L2) >= validation_stability_margin` before overriding.
+
+---
+
+## Multi‑view scoring (normative)
+Score a node as:
+- `score(n) = max(sim_label, sim_def, sim_ex, sim_emp)`
+- short‑query protection (≤2 tokens): `max(sim_label, sim_emp)`
+
+Evidence is persisted per node and blended into the effective label embedding using a bounded weight based on `evidence_count`.
+
+Missing views:
+- If definition/examples/evidence are missing, ignore those views in max pooling.

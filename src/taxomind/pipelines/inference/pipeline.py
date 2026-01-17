@@ -65,7 +65,8 @@ def create_pipeline(**kwargs) -> Pipeline:
             * query_id, query, predicted_code, predicted_label,
             * predicted_level, score, ambiguous, alternatives,
             * stopping_reason, path,
-            * validation_status, validation_override_code, validation_margin
+            * validation_status, validation_override_code, validation_margin,
+            * validation_stability_gap
 
     Parameters:
         inference.retrieval_k: Number of candidates to retrieve (default 20)
@@ -73,11 +74,11 @@ def create_pipeline(**kwargs) -> Pipeline:
         inference.min_descent_gap: Sibling separation threshold (default 0.05)
         inference.parent_veto_margin: Parent competitiveness margin (default 0.05)
         inference.enable_parent_veto: Toggle for parent competitiveness stop
-        inference.enable_candidate_gating: Toggle for candidate-set gating stop
         inference.evidence_tau: Evidence confidence threshold (default 10.0)
         inference.evidence_max_beta: Evidence weight cap (default 0.8)
         inference.short_query_tokens: Short-query token threshold (default 2)
         inference.validation_threshold: Override threshold (default 0.05)
+        inference.validation_stability_margin: Optional stability margin for overrides
         inference.max_depth: Optional maximum depth to descend (default None)
         inference.embedding_batch_size: Batch size for embedding (default 32)
 
@@ -179,7 +180,6 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:inference.min_descent_gap",
                     "params:inference.parent_veto_margin",
                     "params:inference.enable_parent_veto",
-                    "params:inference.enable_candidate_gating",
                     "params:inference.evidence_tau",
                     "params:inference.evidence_max_beta",
                     "params:inference.short_query_tokens",
@@ -198,6 +198,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:inference.evidence_tau",
                     "params:inference.evidence_max_beta",
                     "params:inference.validation_threshold",
+                    "params:inference.validation_stability_margin",
                     "params:inference.short_query_tokens",
                 ],
                 outputs="inference_validated_df",
@@ -248,7 +249,8 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
             * query_id, query, predicted_code, predicted_label,
             * predicted_level, score, ambiguous, alternatives,
             * stopping_reason, path,
-            * validation_status, validation_override_code, validation_margin
+            * validation_status, validation_override_code, validation_margin,
+            * validation_stability_gap
 
     Parameters:
         inference.retrieval_k: Number of candidates to retrieve (default 20)
@@ -256,11 +258,11 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
         inference.min_descent_gap: Sibling separation threshold (default 0.05)
         inference.parent_veto_margin: Parent competitiveness margin (default 0.05)
         inference.enable_parent_veto: Toggle for parent competitiveness stop
-        inference.enable_candidate_gating: Toggle for candidate-set gating stop
         inference.evidence_tau: Evidence confidence threshold (default 10.0)
         inference.evidence_max_beta: Evidence weight cap (default 0.8)
         inference.short_query_tokens: Short-query token threshold (default 2)
         inference.validation_threshold: Override threshold (default 0.05)
+        inference.validation_stability_margin: Optional stability margin for overrides
         inference.max_depth: Optional maximum depth (default None)
         inference.embedding_batch_size: Batch size for embedding (default 32)
 
@@ -367,7 +369,6 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
                     "params:inference.min_descent_gap",
                     "params:inference.parent_veto_margin",
                     "params:inference.enable_parent_veto",
-                    "params:inference.enable_candidate_gating",
                     "params:inference.evidence_tau",
                     "params:inference.evidence_max_beta",
                     "params:inference.short_query_tokens",
@@ -386,6 +387,7 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
                     "params:inference.evidence_tau",
                     "params:inference.evidence_max_beta",
                     "params:inference.validation_threshold",
+                    "params:inference.validation_stability_margin",
                     "params:inference.short_query_tokens",
                 ],
                 outputs="inference_validated_df",

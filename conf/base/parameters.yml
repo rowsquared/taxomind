@@ -98,6 +98,8 @@ inference:
   parent_veto_margin: 0.03  # Margin for parent competitiveness check
                              # If parent_score + margin >= child_score, stop at parent
                              # Prevents forcing descent when parent is competitive
+  enable_parent_veto: false  # Toggle parent competitiveness stop
+                             # Set to false to disable parent veto entirely
 
   # Evidence parameters (per-node dynamic blending)
   evidence_tau: 10.0  # Confidence threshold for beta computation
@@ -112,6 +114,7 @@ inference:
   short_query_tokens: 2  # Short-query threshold for label/evidence-only scoring
 
   validation_threshold: 0.05  # Override threshold for scoped validation
+  validation_stability_margin: null  # Optional stability gap (L* vs second leaf)
 
   use_updated_evidence: true  # Toggle evidence usage from incremental learning
 
@@ -121,6 +124,6 @@ inference:
                    # Example: max_depth: 3 stops at level 3 even if clear winner at level 4
 
   # Batch processing parameters
-  embedding_batch_size: 32  # Batch size for embedding queries
+  embedding_batch_size: 8  # Batch size for embedding queries
                              # Higher values = faster for large batches (more GPU memory)
                              # Lower values = more memory-efficient (less GPU memory)
