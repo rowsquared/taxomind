@@ -892,6 +892,8 @@ def route_query_topdown(
     taxonomy_graph: Dict[str, List[str]],
     min_descent_gap: float = 0.05,
     parent_veto_margin: float = 0.05,
+    enable_parent_veto: bool = True,
+    enable_candidate_gating: bool = True,
     evidence_tau: float = 10.0,
     evidence_max_beta: float = 0.8,
     short_query_tokens: int = 2,
@@ -930,6 +932,8 @@ def route_query_topdown(
         taxonomy_graph: Parent -> children adjacency
         min_descent_gap: Sibling separation threshold (default 0.05)
         parent_veto_margin: Parent competitiveness margin (default 0.05)
+        enable_parent_veto: Toggle for parent competitiveness stop
+        enable_candidate_gating: Toggle for candidate-set gating stop
         evidence_tau: Evidence confidence threshold (default 10.0)
         evidence_max_beta: Evidence weight cap (default 0.8)
         max_depth: Optional max level to descend
@@ -1041,35 +1045,60 @@ def route_query_topdown(
         else:
             sibling_gap = float('inf')  # Only one child
 
+        used_candidate_override = False
+        sorted_candidates = None
+        global_best_child = best_child
+        global_best_score = best_score
+        global_sibling_gap = sibling_gap
+
         if best_child not in V_codes:
-            stopping_reason = "best_child_not_in_candidates"
-            ambiguous = True
-            alternatives = [
-                code for code, _ in sorted_children if code in V_codes
-            ][:3]
-            if not alternatives:
-                alternatives = [best_child]
-            routing_trace.append({
-                "level": current_level + 1,
-                "parent": current_parent,
-                "all_children_count": len(all_children),
-                "candidate_children_count": len(candidate_children),
-                "candidate_children": candidate_children,
-                "scores": child_scores,
-                "best_child": best_child,
-                "best_score": best_score,
-                "sibling_gap": sibling_gap,
-                "decision": "stop_best_child_not_in_candidates",
-            })
-            break
+            if enable_candidate_gating:
+                stopping_reason = "best_child_not_in_candidates"
+                ambiguous = True
+                alternatives = [
+                    code for code, _ in sorted_children if code in V_codes
+                ][:3]
+                if not alternatives:
+                    alternatives = [best_child]
+                routing_trace.append({
+                    "level": current_level + 1,
+                    "parent": current_parent,
+                    "all_children_count": len(all_children),
+                    "candidate_children_count": len(candidate_children),
+                    "candidate_children": candidate_children,
+                    "scores": child_scores,
+                    "best_child": best_child,
+                    "best_score": best_score,
+                    "sibling_gap": sibling_gap,
+                    "decision": "stop_best_child_not_in_candidates",
+                })
+                break
+
+            candidate_scores = {
+                child: child_scores[child] for child in candidate_children
+            }
+            sorted_candidates = sorted(
+                candidate_scores.items(), key=lambda x: x[1], reverse=True
+            )
+            best_child, best_score = sorted_candidates[0]
+            if len(sorted_candidates) > 1:
+                sibling_gap = best_score - sorted_candidates[1][1]
+            else:
+                sibling_gap = float('inf')
+            used_candidate_override = True
 
         # Asymmetric stopping: Check sibling ambiguity
         if sibling_gap < min_descent_gap:
             # Siblings too close - stop at parent (prevents over-specification)
             stopping_reason = "sibling_ambiguity"
             ambiguous = True
-            alternatives = [code for code, _ in sorted_children[:3]]
-            routing_trace.append({
+            alt_source = (
+                sorted_candidates
+                if used_candidate_override and sorted_candidates
+                else sorted_children
+            )
+            alternatives = [code for code, _ in alt_source[:3]]
+            trace_entry = {
                 "level": current_level + 1,
                 "parent": current_parent,
                 "all_children_count": len(all_children),
@@ -1080,11 +1109,20 @@ def route_query_topdown(
                 "best_score": best_score,
                 "sibling_gap": sibling_gap,
                 "decision": "stop_sibling_ambiguity",
-            })
+            }
+            if used_candidate_override:
+                trace_entry["global_best_child"] = global_best_child
+                trace_entry["global_best_score"] = global_best_score
+                trace_entry["global_sibling_gap"] = global_sibling_gap
+            routing_trace.append(trace_entry)
             break
 
         # Parent competitiveness veto (if not at root)
-        if current_parent != "__root__":
+        if (
+            enable_parent_veto
+            and parent_veto_margin is not None
+            and current_parent != "__root__"
+        ):
             parent_score = compute_multiview_score(
                 query_embedding=query_embedding,
                 query_text=query_text,
@@ -1102,7 +1140,7 @@ def route_query_topdown(
                 alternatives = [current_parent, best_child]
                 scores_with_parent = dict(child_scores)
                 scores_with_parent[current_parent] = parent_score
-                routing_trace.append({
+                trace_entry = {
                     "level": current_level + 1,
                     "parent": current_parent,
                     "all_children_count": len(all_children),
@@ -1113,11 +1151,16 @@ def route_query_topdown(
                     "best_score": best_score,
                     "sibling_gap": sibling_gap,
                     "decision": "stop_parent_competitive",
-                })
+                }
+                if used_candidate_override:
+                    trace_entry["global_best_child"] = global_best_child
+                    trace_entry["global_best_score"] = global_best_score
+                    trace_entry["global_sibling_gap"] = global_sibling_gap
+                routing_trace.append(trace_entry)
                 break
 
         # Record trace
-        routing_trace.append({
+        trace_entry = {
             "level": current_level + 1,
             "parent": current_parent,
             "all_children_count": len(all_children),
@@ -1128,7 +1171,12 @@ def route_query_topdown(
             "best_score": best_score,
             "sibling_gap": sibling_gap,
             "decision": "descend",
-        })
+        }
+        if used_candidate_override:
+            trace_entry["global_best_child"] = global_best_child
+            trace_entry["global_best_score"] = global_best_score
+            trace_entry["global_sibling_gap"] = global_sibling_gap
+        routing_trace.append(trace_entry)
 
         # Descend to best child
         path.append(best_child)
@@ -1352,6 +1400,8 @@ def batch_route_topdown(
     taxonomy_graph: Dict[str, List[str]],
     min_descent_gap: float = 0.05,
     parent_veto_margin: float = 0.05,
+    enable_parent_veto: bool = True,
+    enable_candidate_gating: bool = True,
     evidence_tau: float = 10.0,
     evidence_max_beta: float = 0.8,
     short_query_tokens: int = 2,
@@ -1366,6 +1416,8 @@ def batch_route_topdown(
         taxonomy_graph: Parent-child adjacency
         min_descent_gap: Sibling separation threshold
         parent_veto_margin: Parent competitiveness margin
+        enable_parent_veto: Toggle for parent competitiveness stop
+        enable_candidate_gating: Toggle for candidate-set gating stop
         evidence_tau: Evidence confidence threshold
         evidence_max_beta: Evidence weight cap
         short_query_tokens: Token threshold for short-query rule
@@ -1413,6 +1465,8 @@ def batch_route_topdown(
                         taxonomy_graph=taxonomy_graph,
                         min_descent_gap=min_descent_gap,
                         parent_veto_margin=parent_veto_margin,
+                        enable_parent_veto=enable_parent_veto,
+                        enable_candidate_gating=enable_candidate_gating,
                         evidence_tau=evidence_tau,
                         evidence_max_beta=evidence_max_beta,
                         short_query_tokens=short_query_tokens,
@@ -1637,6 +1691,8 @@ def batch_inference(
     beam_count: int = 2,
     min_descent_gap: float = 0.05,
     parent_veto_margin: float = 0.05,
+    enable_parent_veto: bool = True,
+    enable_candidate_gating: bool = True,
     evidence_tau: float = 10.0,
     evidence_max_beta: float = 0.8,
     short_query_tokens: int = 2,
@@ -1660,6 +1716,8 @@ def batch_inference(
         retrieval_k: Number of candidates to retrieve
         min_descent_gap: Sibling separation threshold
         parent_veto_margin: Parent competitiveness margin
+        enable_parent_veto: Toggle for parent competitiveness stop
+        enable_candidate_gating: Toggle for candidate-set gating stop
         beta: Evidence weight
         short_query_tokens: Token threshold for short-query rule
         validation_threshold: Override threshold for scoped validation
@@ -1704,6 +1762,8 @@ def batch_inference(
         taxonomy_graph=taxonomy_graph,
         min_descent_gap=min_descent_gap,
         parent_veto_margin=parent_veto_margin,
+        enable_parent_veto=enable_parent_veto,
+        enable_candidate_gating=enable_candidate_gating,
         evidence_tau=evidence_tau,
         evidence_max_beta=evidence_max_beta,
         short_query_tokens=short_query_tokens,

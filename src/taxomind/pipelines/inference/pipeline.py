@@ -72,6 +72,8 @@ def create_pipeline(**kwargs) -> Pipeline:
         inference.beam_count: Number of root beams to select (default 2)
         inference.min_descent_gap: Sibling separation threshold (default 0.05)
         inference.parent_veto_margin: Parent competitiveness margin (default 0.05)
+        inference.enable_parent_veto: Toggle for parent competitiveness stop
+        inference.enable_candidate_gating: Toggle for candidate-set gating stop
         inference.evidence_tau: Evidence confidence threshold (default 10.0)
         inference.evidence_max_beta: Evidence weight cap (default 0.8)
         inference.short_query_tokens: Short-query token threshold (default 2)
@@ -176,6 +178,8 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "inference_taxonomy_graph",
                     "params:inference.min_descent_gap",
                     "params:inference.parent_veto_margin",
+                    "params:inference.enable_parent_veto",
+                    "params:inference.enable_candidate_gating",
                     "params:inference.evidence_tau",
                     "params:inference.evidence_max_beta",
                     "params:inference.short_query_tokens",
@@ -251,6 +255,8 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
         inference.beam_count: Number of root beams to select (default 2)
         inference.min_descent_gap: Sibling separation threshold (default 0.05)
         inference.parent_veto_margin: Parent competitiveness margin (default 0.05)
+        inference.enable_parent_veto: Toggle for parent competitiveness stop
+        inference.enable_candidate_gating: Toggle for candidate-set gating stop
         inference.evidence_tau: Evidence confidence threshold (default 10.0)
         inference.evidence_max_beta: Evidence weight cap (default 0.8)
         inference.short_query_tokens: Short-query token threshold (default 2)
@@ -360,6 +366,8 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
                     "inference_taxonomy_graph",
                     "params:inference.min_descent_gap",
                     "params:inference.parent_veto_margin",
+                    "params:inference.enable_parent_veto",
+                    "params:inference.enable_candidate_gating",
                     "params:inference.evidence_tau",
                     "params:inference.evidence_max_beta",
                     "params:inference.short_query_tokens",
