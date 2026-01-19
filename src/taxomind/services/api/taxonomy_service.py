@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Dict
 
@@ -16,6 +17,16 @@ from taxomind.services.api.kedro_utils import release_catalog_datasets
 from taxomind.storage.job_store import get_job_store
 
 logger = logging.getLogger(__name__)
+
+
+def _run_taxonomy_pipeline_worker(
+    pipeline_name: str,
+    job_id: str,
+    taxonomy_key: str,
+    taxonomy_data: Dict[str, Any] | None,
+) -> None:
+    service = TaxonomyPipelineService(pipeline_name=pipeline_name)
+    service._run_pipeline_in_process(job_id, taxonomy_key, taxonomy_data)
 
 
 class TaxonomyPipelineService:
@@ -39,8 +50,34 @@ class TaxonomyPipelineService:
         taxonomy_key: str,
         taxonomy_data: Dict[str, Any] | None = None,
     ) -> None:
+        """Execute a taxonomy pipeline in a short-lived worker process."""
+        context = get_context("spawn")
+        process = context.Process(
+            target=_run_taxonomy_pipeline_worker,
+            args=(self.pipeline_name, job_id, taxonomy_key, taxonomy_data),
+            daemon=True,
+        )
+        try:
+            process.start()
+        except Exception as exc:
+            error_msg = f"Failed to start taxonomy worker: {exc}"
+            logger.error("Job %s: %s", job_id, error_msg)
+            self.job_store.update_job(
+                job_id,
+                status="failed",
+                error=error_msg,
+                message="Failed to start pipeline worker",
+                completed_at=datetime.now(UTC),
+            )
+
+    def _run_pipeline_in_process(
+        self,
+        job_id: str,
+        taxonomy_key: str,
+        taxonomy_data: Dict[str, Any] | None = None,
+    ) -> None:
         """
-        Execute a taxonomy pipeline in the background.
+        Execute a taxonomy pipeline in the worker process.
         Updates job status throughout execution.
         """
         try:

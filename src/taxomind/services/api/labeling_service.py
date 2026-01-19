@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -26,6 +27,16 @@ from taxomind.utils.text_utils import build_text_variable
 logger = logging.getLogger(__name__)
 
 
+def _run_labeling_pipeline_worker(
+    pipeline_name: str,
+    job_id: str,
+    batch_id: str,
+    labeling_data: Dict[str, Any],
+) -> None:
+    service = LabelingPipelineService(pipeline_name=pipeline_name)
+    service._run_pipeline_in_process(job_id, batch_id, labeling_data)
+
+
 class LabelingPipelineService:
     """Service for executing the inference pipeline with job tracking."""
 
@@ -44,8 +55,31 @@ class LabelingPipelineService:
     def run_pipeline(
         self, job_id: str, batch_id: str, labeling_data: Dict[str, Any]
     ) -> None:
+        """Execute the labeling pipeline in a short-lived worker process."""
+        context = get_context("spawn")
+        process = context.Process(
+            target=_run_labeling_pipeline_worker,
+            args=(self.pipeline_name, job_id, batch_id, labeling_data),
+            daemon=True,
+        )
+        try:
+            process.start()
+        except Exception as exc:
+            error_msg = f"Failed to start labeling worker: {exc}"
+            logger.error("Job %s: %s", job_id, error_msg)
+            self.job_store.update_job(
+                job_id,
+                status="failed",
+                error=error_msg,
+                message="Failed to start pipeline worker",
+                completed_at=datetime.now(UTC),
+            )
+
+    def _run_pipeline_in_process(
+        self, job_id: str, batch_id: str, labeling_data: Dict[str, Any]
+    ) -> None:
         """
-        Execute the inference pipeline in the background.
+        Execute the inference pipeline in the worker process.
         Updates job status throughout execution.
         """
         try:

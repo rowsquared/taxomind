@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Dict
 
@@ -17,6 +18,11 @@ from taxomind.services.api.kedro_utils import release_catalog_datasets
 from taxomind.storage.job_store import get_job_store
 
 logger = logging.getLogger(__name__)
+
+
+def _run_error_analysis_worker(pipeline_name: str, job_id: str) -> None:
+    service = ErrorAnalysisPipelineService(pipeline_name=pipeline_name)
+    service._run_pipeline_in_process(job_id)
 
 
 class ErrorAnalysisPipelineService:
@@ -34,7 +40,28 @@ class ErrorAnalysisPipelineService:
             ErrorAnalysisPipelineService._bootstrapped = True
 
     def run_pipeline(self, job_id: str) -> None:
-        """Execute the error analysis pipeline in the background."""
+        """Execute the error analysis pipeline in a short-lived worker process."""
+        context = get_context("spawn")
+        process = context.Process(
+            target=_run_error_analysis_worker,
+            args=(self.pipeline_name, job_id),
+            daemon=True,
+        )
+        try:
+            process.start()
+        except Exception as exc:
+            error_msg = f"Failed to start error analysis worker: {exc}"
+            logger.error("Job %s: %s", job_id, error_msg)
+            self.job_store.update_job(
+                job_id,
+                status="failed",
+                error=error_msg,
+                message="Failed to start pipeline worker",
+                completed_at=datetime.now(UTC),
+            )
+
+    def _run_pipeline_in_process(self, job_id: str) -> None:
+        """Execute the error analysis pipeline in the worker process."""
         try:
             self.job_store.update_job(
                 job_id,

@@ -20,6 +20,7 @@ class JobStore:
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._storage_path = self._init_storage_path(storage_path)
+        self._last_loaded_mtime_ns: int | None = None
         if self._storage_path is not None:
             self._load()
 
@@ -74,6 +75,24 @@ class JobStore:
             for job_id, job in data.items()
             if isinstance(job, dict)
         }
+        self._last_loaded_mtime_ns = self._get_mtime_ns()
+
+    def _get_mtime_ns(self) -> int | None:
+        if self._storage_path is None:
+            return None
+        try:
+            return self._storage_path.stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def _maybe_reload(self) -> None:
+        if self._storage_path is None:
+            return
+        mtime_ns = self._get_mtime_ns()
+        if mtime_ns is None:
+            return
+        if self._last_loaded_mtime_ns is None or mtime_ns > self._last_loaded_mtime_ns:
+            self._load()
 
     def _persist(self) -> None:
         if self._storage_path is None:
@@ -89,12 +108,14 @@ class JobStore:
         try:
             tmp_path.write_text(json.dumps(data, indent=2))
             tmp_path.replace(self._storage_path)
+            self._last_loaded_mtime_ns = self._get_mtime_ns()
         except OSError as exc:
             logger.warning("Failed to persist job store: %s", exc)
 
     def create_job(self, job_id: str, **kwargs) -> Dict[str, Any]:
         """Create a new job entry with initial status."""
         with self._lock:
+            self._maybe_reload()
             job_data = {
                 "job_id": job_id,
                 "status": "pending",
@@ -112,6 +133,7 @@ class JobStore:
     def update_job(self, job_id: str, **kwargs) -> Optional[Dict[str, Any]]:
         """Update an existing job's status and metadata."""
         with self._lock:
+            self._maybe_reload()
             if job_id not in self._jobs:
                 return None
             self._jobs[job_id].update(kwargs)
@@ -121,17 +143,20 @@ class JobStore:
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve job data by ID."""
         with self._lock:
+            self._maybe_reload()
             job = self._jobs.get(job_id)
             return job.copy() if job else None
 
     def list_jobs(self) -> list[Dict[str, Any]]:
         """List all jobs."""
         with self._lock:
+            self._maybe_reload()
             return [job.copy() for job in self._jobs.values()]
 
     def delete_job(self, job_id: str) -> bool:
         """Delete a job entry."""
         with self._lock:
+            self._maybe_reload()
             if job_id in self._jobs:
                 del self._jobs[job_id]
                 self._persist()

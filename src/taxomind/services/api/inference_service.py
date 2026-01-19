@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Dict
 
@@ -18,6 +19,16 @@ from taxomind.storage.job_store import get_job_store
 from taxomind.utils.text_utils import build_text_variable
 
 logger = logging.getLogger(__name__)
+
+
+def _run_inference_pipeline_worker(
+    pipeline_name: str,
+    job_id: str,
+    taxonomy_key: str,
+    inference_data: Dict[str, Any],
+) -> None:
+    service = InferencePipelineService(pipeline_name=pipeline_name)
+    service._run_pipeline_in_process(job_id, taxonomy_key, inference_data)
 
 
 class InferencePipelineService:
@@ -43,8 +54,31 @@ class InferencePipelineService:
     def run_pipeline(
         self, job_id: str, taxonomy_key: str, inference_data: Dict[str, Any]
     ) -> None:
+        """Execute the inference pipeline in a short-lived worker process."""
+        context = get_context("spawn")
+        process = context.Process(
+            target=_run_inference_pipeline_worker,
+            args=(self.pipeline_name, job_id, taxonomy_key, inference_data),
+            daemon=True,
+        )
+        try:
+            process.start()
+        except Exception as exc:
+            error_msg = f"Failed to start inference worker: {exc}"
+            logger.error("Job %s: %s", job_id, error_msg)
+            self.job_store.update_job(
+                job_id,
+                status="failed",
+                error=error_msg,
+                message="Failed to start pipeline worker",
+                failed_at=datetime.now(UTC),
+            )
+
+    def _run_pipeline_in_process(
+        self, job_id: str, taxonomy_key: str, inference_data: Dict[str, Any]
+    ) -> None:
         """
-        Execute the inference pipeline in background.
+        Execute the inference pipeline in the worker process.
         Updates job status throughout execution.
 
         Args:
