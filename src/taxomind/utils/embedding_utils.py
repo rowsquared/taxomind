@@ -60,6 +60,7 @@ def encode_texts(
     input_prefix: Optional[str] = None,
     batch_size: int = 32,
     show_progress_bar: bool = True,
+    max_chars: int | None = 100,
 ) -> Tuple[np.ndarray, List[int]]:
     """
     Encode texts with a SentenceTransformer model.
@@ -67,16 +68,25 @@ def encode_texts(
     Returns:
         (embeddings, indices) where indices map embeddings to input rows.
     """
+    def _truncate_text(value: Any) -> str:
+        text = str(value)
+        if max_chars is None:
+            return text
+        if max_chars <= 0:
+            return ""
+        return text[:max_chars]
+
     text_list = list(texts)
 
     if embed_all:
-        embed_texts = apply_input_prefix(text_list, input_prefix)
+        truncated_texts = [_truncate_text(text) for text in text_list]
+        embed_texts = apply_input_prefix(truncated_texts, input_prefix)
         indices = list(range(len(text_list)))
     else:
         embed_texts = []
         indices = []
         for idx, text in enumerate(text_list):
-            text_stripped = str(text).strip()
+            text_stripped = _truncate_text(text).strip()
             if text_stripped:
                 embed_texts.append(text_stripped)
                 indices.append(idx)

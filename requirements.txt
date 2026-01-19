@@ -6,7 +6,6 @@ sentence-transformers
 txtai
 fastapi
 uvicorn[standard]
-setfit
 scikit-learn
 pandas
 numpy

@@ -55,9 +55,8 @@ class LearningPipelineService:
         1. Validate the training payload
         2. Convert API format to training DataFrame
         3. Append to existing training data
-        4. Train SetFit models for all levels
-        5. Update model version metadata
-        6. Create training summary
+        4. Update model version metadata
+        5. Create training summary
         """
         try:
             # Update status to running
