@@ -1,18 +1,28 @@
 # Taxomind API - Production Dockerfile for Coolify
-FROM pytorch/pytorch:2.3.1-cpu
+FROM python:3.13-slim
 
 WORKDIR /app
 
-# Keep container output unbuffered and avoid pip cache bloat
+# Keep container output unbuffered
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PYTHONDONTWRITEBYTECODE=1
+
+# Install system dependencies (minimal)
+RUN apt-get update && apt-get install -y \
+    --no-install-recommends \
+    build-essential \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy only production requirements
 COPY requirements-prod.txt .
 
 # Install production dependencies only
-RUN pip install --upgrade pip && \
+RUN pip install --upgrade pip setuptools wheel && \
     pip install -r requirements-prod.txt
 
 # Copy application files
