@@ -332,6 +332,7 @@ def build_similar_labels(
     embedding_model: SentenceTransformer,
     k_similar_labels: int,
     embedding_prefix: Dict[str, str],
+    batch_size: int = 32,
 ) -> pd.DataFrame:
     """
     Find similar labels at each level using embeddings.
@@ -372,7 +373,7 @@ def build_similar_labels(
                 labels,
                 embed_all=True,
                 input_prefix=prefix,
-                batch_size=32,
+                batch_size=batch_size,
                 show_progress_bar=False,
             )
         except Exception as exc:

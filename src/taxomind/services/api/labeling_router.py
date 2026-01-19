@@ -1,4 +1,4 @@
-"""FastAPI router for zero-shot labeling with async job tracking."""
+"""FastAPI router for inference labeling with async job tracking."""
 
 from __future__ import annotations
 
@@ -36,11 +36,11 @@ async def create_labeling_job(
     job_store: JobStore = Depends(get_job_store),
 ) -> LabelingJobResponse:
     """
-    Create a new labeling job by triggering zero-shot pipeline asynchronously.
+    Create a new labeling job by triggering the inference pipeline asynchronously.
 
     This endpoint accepts a batch of sentences and immediately returns a
     job ID. The actual classification happens in the background and can
-    take several minutes depending on batch size.
+    take several minutes depending on batch size and model configuration.
 
     Use the GET /label/{job_id}/status endpoint to check job status.
 

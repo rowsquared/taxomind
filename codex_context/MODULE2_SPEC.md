@@ -64,6 +64,7 @@ If retrieval returns mixed topics (e.g., “Legislators” also retrieves “Law
 - aggregate evidence per root from retrieved items
 - keep top‑B roots
 - route each root beam independently and select the best final output
+- if beam selection is disabled, route all L1 roots in V
 
 ---
 
@@ -107,3 +108,18 @@ Evidence is persisted per node and blended into the effective label embedding us
 
 Missing views:
 - If definition/examples/evidence are missing, ignore those views in max pooling.
+
+---
+
+## Parameters
+- `retrieval_k`
+- `beam_count`
+- `enable_beam_selection`
+- `short_query_tokens`
+- `min_descent_gap`
+- `enable_parent_veto` (bool)
+- `parent_veto_margin`
+- `validation_threshold`
+- `validation_stability_margin` (optional)
+- `evidence_tau`
+- `evidence_max_beta`

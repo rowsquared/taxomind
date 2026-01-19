@@ -9,7 +9,12 @@ from fastapi import FastAPI
 
 from taxomind import __version__
 
-from . import inference_router, labeling_router, learning_router, taxonomy_router
+from . import (
+    error_analysis_router,
+    labeling_router,
+    learning_router,
+    taxonomy_router,
+)
 
 
 def load_env_file():
@@ -43,7 +48,7 @@ app = FastAPI(
     title="taxomind",
     description=(
         "Multilingual taxonomy classification service with async taxonomy "
-        "management and zero-shot labeling."
+        "management and hierarchical inference labeling."
     ),
     version=__version__,
 )
@@ -62,4 +67,4 @@ async def health_check():
 app.include_router(taxonomy_router.router)
 app.include_router(labeling_router.router)
 app.include_router(learning_router.router)
-app.include_router(inference_router.router)
+app.include_router(error_analysis_router.router)

@@ -147,6 +147,7 @@ def build_text_embeddings(
     taxonomy_df: pd.DataFrame,
     embedding_model: SentenceTransformer,
     embedding_spec: dict,
+    batch_size: int = 16,
     input_prefix: Optional[str] = None,
 ) -> pd.DataFrame:
     """
@@ -162,6 +163,7 @@ def build_text_embeddings(
             - embed_all: optional bool, embed all rows (including empty)
             - warn_on_empty: optional bool, warn on empty text
             - log_counts: optional bool, log with/without text counts
+        batch_size: Batch size for embedding calls
         input_prefix: Optional prefix to add before non-empty text (model-specific)
 
     Returns:
@@ -205,7 +207,7 @@ def build_text_embeddings(
             texts.tolist(),
             embed_all=True,
             input_prefix=input_prefix,
-            batch_size=32,
+            batch_size=batch_size,
             show_progress_bar=True,
         )
 
@@ -222,7 +224,7 @@ def build_text_embeddings(
         texts.tolist(),
         embed_all=False,
         input_prefix=input_prefix,
-        batch_size=32,
+        batch_size=batch_size,
         show_progress_bar=True,
     )
 

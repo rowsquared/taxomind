@@ -36,7 +36,7 @@ async def create_inference_job(
     Create an inference job for hierarchical classification.
 
     This endpoint accepts sentences with field dictionaries, concatenates them into text,
-    and classifies them using trained SetFit models for all hierarchical levels.
+    and classifies them using trained ye models for all hierarchical levels.
 
     **Authentication**: Requires Bearer token in Authorization header.
 

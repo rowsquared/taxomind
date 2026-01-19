@@ -1,7 +1,8 @@
-"""Service layer for running zero-shot labeling pipeline asynchronously."""
+"""Service layer for running inference labeling pipeline asynchronously."""
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,7 +11,6 @@ from typing import Any, Dict, List
 from kedro import __version__ as kedro_version
 from kedro.framework.session import KedroSession
 from kedro.framework.startup import bootstrap_project
-from kedro.io import MemoryDataset
 from kedro.runner import SequentialRunner
 
 from taxomind.services.api.labeling_models import (
@@ -20,16 +20,17 @@ from taxomind.services.api.labeling_models import (
     SentenceSuggestion,
 )
 from taxomind.storage.job_store import get_job_store
+from taxomind.utils.text_utils import build_text_variable
 
 logger = logging.getLogger(__name__)
 
 
 class LabelingPipelineService:
-    """Service for executing zero-shot labeling pipeline with job tracking."""
+    """Service for executing the inference pipeline with job tracking."""
 
     _bootstrapped = False
 
-    def __init__(self, pipeline_name: str = "zero_shot_pipe") -> None:
+    def __init__(self, pipeline_name: str = "inference_batch") -> None:
         self.pipeline_name = pipeline_name
         self.project_path = Path(__file__).resolve().parents[4]
         self.job_store = get_job_store()
@@ -43,7 +44,7 @@ class LabelingPipelineService:
         self, job_id: str, batch_id: str, labeling_data: Dict[str, Any]
     ) -> None:
         """
-        Execute the zero-shot labeling pipeline in background.
+        Execute the inference pipeline in the background.
         Updates job status throughout execution.
         """
         try:
@@ -55,14 +56,44 @@ class LabelingPipelineService:
                 message="Starting labeling pipeline",
             )
 
+            taxonomy_key = labeling_data.get("taxonomyKey")
+            sentences = labeling_data.get("sentences") or []
+            query_texts: list[str] = []
+            query_id_to_sentence_id: dict[int, str] = {}
+            preflight_errors: list[SentenceError] = []
+
+            for sentence in sentences:
+                sentence_id = str(sentence.get("sentence_id") or "").strip()
+                if not sentence_id:
+                    continue
+                fields = sentence.get("fields") or {}
+                if not isinstance(fields, dict):
+                    fields = {}
+                text = build_text_variable(fields)
+                if not text:
+                    preflight_errors.append(
+                        SentenceError(
+                            sentenceId=sentence_id,
+                            error="Unable to classify: empty text after concatenating fields",
+                        )
+                    )
+                    continue
+                query_id = len(query_texts)
+                query_texts.append(text)
+                query_id_to_sentence_id[query_id] = sentence_id
+
             logger.info(
                 f"Job {job_id}: Running labeling pipeline for batch "
-                f"'{batch_id}' with taxonomy '{labeling_data.get('taxonomyKey')}'"
+                f"'{batch_id}' with taxonomy '{taxonomy_key}'"
             )
 
             # Run Kedro pipeline
             with KedroSession.create(
-                project_path=self.project_path
+                project_path=self.project_path,
+                runtime_params={
+                    "taxonomy_key": taxonomy_key,
+                    "inference_query_input": query_texts,
+                },
             ) as session:
                 context = session.load_context()
 
@@ -76,11 +107,8 @@ class LabelingPipelineService:
                 self.job_store.update_job(
                     job_id,
                     progress=0.2,
-                    message="Loading sentences and taxonomy",
+                    message="Preparing queries and loading taxonomy",
                 )
-
-                # Save labeling data to catalog
-                catalog.save("isco_test_sentences", labeling_data)
 
                 # Prepare hooks and run params
                 hook_manager = session._hook_manager
@@ -94,7 +122,7 @@ class LabelingPipelineService:
                 self.job_store.update_job(
                     job_id,
                     progress=0.3,
-                    message="Computing embeddings and classifications",
+                    message="Running inference pipeline",
                 )
 
                 runner = SequentialRunner()
@@ -128,11 +156,14 @@ class LabelingPipelineService:
                     message="Formatting results",
                 )
 
-                judgement_results = catalog.load("zero_shot_judgement")
+                predictions_df = catalog.load("inference_predictions_df")
 
                 # Transform results to API format
                 labeling_response = self._format_results(
-                    batch_id, judgement_results
+                    batch_id,
+                    predictions_df,
+                    query_id_to_sentence_id=query_id_to_sentence_id,
+                    preflight_errors=preflight_errors,
                 )
 
                 # Pipeline completed successfully
@@ -161,62 +192,99 @@ class LabelingPipelineService:
             )
 
     def _format_results(
-        self, batch_id: str, judgement_results: Dict[str, Any]
+        self,
+        batch_id: str,
+        predictions_df: Any,
+        *,
+        query_id_to_sentence_id: dict[int, str],
+        preflight_errors: list[SentenceError],
     ) -> LabelingResponse:
-        """Transform pipeline output to API response format."""
-        api_suggestions: List[SentenceSuggestion] = []
-        api_errors: List[SentenceError] = []
+        """Transform inference pipeline output to API response format."""
+        api_suggestions: list[SentenceSuggestion] = []
+        api_errors: list[SentenceError] = list(preflight_errors)
 
-        # Extract results from judgement output
-        # Pipeline returns {"suggestions": [...], "errors": [...]}
-        suggestions = judgement_results.get("suggestions", [])
-
-        for suggestion in suggestions:
-            sentence_id = suggestion.get("sentenceId")
-
-            # Extract annotations from the suggestion
-            annotations_data = suggestion.get("annotations", [])
-
-            annotations: List[Annotation] = []
-            for node in annotations_data:
-                annotations.append(
-                    Annotation(
-                        level=node.get("level"),
-                        nodeCode=node.get("nodeCode"),
-                        confidence=node.get("confidence", 0.0),
-                    )
+        if predictions_df is None:
+            api_errors.append(
+                SentenceError(
+                    sentenceId="__batch__",
+                    error="Inference failed: missing inference_predictions_df",
                 )
+            )
+            return LabelingResponse(batchId=batch_id, suggestions=[], errors=api_errors)
 
-            if annotations:
-                api_suggestions.append(
-                    SentenceSuggestion(
-                        sentenceId=sentence_id,
-                        annotations=annotations
-                    )
-                )
-            else:
-                # No annotations found - treat as error
+        # Defensive: Kedro may serialize list columns as JSON strings.
+        def _coerce_json(value: Any) -> Any:
+            if isinstance(value, str):
+                value_str = value.strip()
+                if value_str.startswith("[") or value_str.startswith("{"):
+                    try:
+                        return json.loads(value_str)
+                    except Exception:
+                        return value
+            return value
+
+        for _, row in predictions_df.iterrows():
+            query_id = row.get("query_id")
+            sentence_id = query_id_to_sentence_id.get(int(query_id)) if query_id is not None else None
+            if not sentence_id:
+                continue
+
+            predicted_code = str(row.get("predicted_code") or "").strip()
+            if not predicted_code or predicted_code == "__root__":
                 api_errors.append(
                     SentenceError(
                         sentenceId=sentence_id,
-                        error="No classifications found"
+                        error="Unable to classify: insufficient information",
                     )
                 )
+                continue
 
-        # Add pipeline errors if any
-        pipeline_errors = judgement_results.get("errors", [])
-        for error in pipeline_errors:
-            api_errors.append(
-                SentenceError(
-                    sentenceId=error.get("sentence_id"),
-                    error=error.get("error", "Unknown error")
+            path = _coerce_json(row.get("path")) or []
+            routing_trace = _coerce_json(row.get("routing_trace")) or []
+
+            if isinstance(path, list) and path and path[0] == "__root__":
+                path = path[1:]
+
+            final_score = row.get("score")
+            try:
+                final_score_float = float(final_score) if final_score is not None else 0.0
+            except (TypeError, ValueError):
+                final_score_float = 0.0
+
+            annotations: list[Annotation] = []
+            for idx, code in enumerate(path):
+                level = idx + 1
+                raw_conf = final_score_float
+                if idx > 0 and isinstance(routing_trace, list) and len(routing_trace) >= idx:
+                    raw = routing_trace[idx - 1].get("best_score")
+                    if raw is not None:
+                        try:
+                            raw_conf = float(raw)
+                        except (TypeError, ValueError):
+                            raw_conf = final_score_float
+
+                confidence = max(0.0, min(1.0, raw_conf))
+                annotations.append(
+                    Annotation(level=level, nodeCode=str(code), confidence=confidence)
                 )
+
+            if not annotations:
+                api_errors.append(
+                    SentenceError(
+                        sentenceId=sentence_id,
+                        error="Unable to classify: empty predicted path",
+                    )
+                )
+                continue
+
+            api_suggestions.append(
+                SentenceSuggestion(sentenceId=sentence_id, annotations=annotations)
             )
 
         return LabelingResponse(
             batchId=batch_id,
             suggestions=api_suggestions,
-            errors=api_errors
+            errors=api_errors,
         )
 
     def _build_run_params(

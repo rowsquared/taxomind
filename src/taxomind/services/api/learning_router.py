@@ -1,4 +1,4 @@
-"""FastAPI router for incremental training with async job tracking."""
+"""FastAPI router for incremental learning (evidence updates) with async job tracking."""
 
 from __future__ import annotations
 
@@ -37,18 +37,16 @@ async def create_learning_job(
     job_store: JobStore = Depends(get_job_store),
 ) -> LearningJobResponse:
     """
-    Create a new incremental training job by triggering learning pipeline asynchronously.
+    Create a new incremental learning job by triggering the learning pipeline asynchronously.
 
     This endpoint accepts training sentences with annotations and immediately returns a
-    job ID. The actual model training happens in the background and can take several
-    minutes to hours depending on dataset size and number of hierarchical levels.
+    job ID. The evidence update happens in the background and can take several
+    minutes depending on dataset size.
 
-    The training process will:
-    1. Validate the training payload against the taxonomy structure
-    2. Convert API format to training data format
-    3. Append new samples to existing training dataset (deduplicating by sentenceId)
-    4. Train SetFit models for all hierarchical levels
-    5. Generate versioned model artifacts with incremented version number
+    The learning process will:
+    1. Validate the payload
+    2. Embed the corrected texts
+    3. Update per-node evidence centroids (no ancestor drift)
 
     Use the GET /learn/{job_id}/status endpoint to poll for job completion.
 
@@ -91,7 +89,7 @@ async def create_learning_job(
     job_store.create_job(
         job_id=job_id,
         status="pending",
-        message=f"Training job queued for taxonomy {request.taxonomyKey}",
+        message=f"Learning job queued for taxonomy {request.taxonomyKey}",
         created_at=datetime.now(UTC),
         taxonomy_key=request.taxonomyKey,
     )
@@ -127,7 +125,7 @@ async def create_learning_job(
         jobId=job_id,
         status="pending",
         taxonomyKey=request.taxonomyKey,
-        message=f"Training job initiated for taxonomy {request.taxonomyKey}",
+        message=f"Learning job initiated for taxonomy {request.taxonomyKey}",
         createdAt=datetime.now(UTC),
     )
 

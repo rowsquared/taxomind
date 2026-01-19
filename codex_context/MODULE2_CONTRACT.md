@@ -101,11 +101,13 @@ Notes:
 Use retrieval evidence to select a small set of L1 roots (beam) before routing:
 - For each retrieved code `r`, map to its L1 root `root(r)`.
 - Aggregate evidence per root (e.g., sum of positive retrieval scores, or sum of top‑N per root).
-- Keep top `beam_count` roots.
+- Keep top `beam_count` roots (when beam selection is enabled).
 
-Routing can be run:
+Routing can be run (when beam selection is enabled):
 - per beam root independently, then pick best final,
 - or as a single run that starts at `__root__` but prioritizes beam roots.
+
+If beam selection is disabled, route all L1 roots in V.
 
 Guard:
 - Beam roots are chosen from retrieval evidence, but routing must still include
@@ -149,8 +151,10 @@ Important: validation must not require full taxonomy scans; it is restricted to 
 ## Parameters (minimum set)
 - `retrieval_k`
 - `beam_count`
+- `enable_beam_selection`
 - `short_query_tokens`
 - `min_descent_gap`
+- `enable_parent_veto` (bool; if false, ignore parent veto and rely on sibling separation only)
 - `parent_veto_margin`
 - `validation_threshold`
 - `validation_stability_margin` (optional)

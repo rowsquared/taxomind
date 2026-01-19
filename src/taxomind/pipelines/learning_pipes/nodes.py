@@ -184,6 +184,7 @@ def embed_learning_updates(
     cache_dir: str | None = None,
     local_files_only: bool = False,
     query_prefix: str | None = None,
+    batch_size: int = 32,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Embed update texts and filter invalid node codes."""
 
@@ -223,7 +224,7 @@ def embed_learning_updates(
         model,
         embed_texts_input,
         embed_all=True,
-        batch_size=32,
+        batch_size=batch_size,
         show_progress_bar=False,
     )
     valid_updates["embedding"] = list(embeddings)

@@ -1,18 +1,96 @@
-"""Thread-safe in-memory job status storage."""
+"""Thread-safe job status storage with optional persistence."""
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import threading
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class JobStore:
-    """Thread-safe in-memory storage for job status tracking."""
+    """Thread-safe storage for job status tracking."""
 
-    def __init__(self):
+    def __init__(self, storage_path: str | None = None) -> None:
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
+        self._storage_path = self._init_storage_path(storage_path)
+        if self._storage_path is not None:
+            self._load()
+
+    def _init_storage_path(self, storage_path: str | None) -> Path | None:
+        if storage_path is None:
+            storage_path = os.getenv("JOB_STORE_PATH", "data/09_job_store/jobs.json")
+        path = Path(storage_path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning("JobStore persistence disabled: %s", exc)
+            return None
+        return path
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    def _parse_datetime(self, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        candidate = value
+        if candidate.endswith("Z"):
+            candidate = candidate[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            return value
+
+    def _deserialize_job(self, job: Dict[str, Any]) -> Dict[str, Any]:
+        parsed: Dict[str, Any] = {}
+        for key, value in job.items():
+            if key.endswith("_at"):
+                parsed[key] = self._parse_datetime(value)
+            else:
+                parsed[key] = value
+        return parsed
+
+    def _load(self) -> None:
+        if self._storage_path is None or not self._storage_path.exists():
+            return
+        try:
+            data = json.loads(self._storage_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to load job store: %s", exc)
+            return
+        if not isinstance(data, dict):
+            return
+        self._jobs = {
+            job_id: self._deserialize_job(job)
+            for job_id, job in data.items()
+            if isinstance(job, dict)
+        }
+
+    def _persist(self) -> None:
+        if self._storage_path is None:
+            return
+        data = {
+            job_id: {
+                key: self._serialize_value(value)
+                for key, value in job.items()
+            }
+            for job_id, job in self._jobs.items()
+        }
+        tmp_path = self._storage_path.with_suffix(self._storage_path.suffix + ".tmp")
+        try:
+            tmp_path.write_text(json.dumps(data, indent=2))
+            tmp_path.replace(self._storage_path)
+        except OSError as exc:
+            logger.warning("Failed to persist job store: %s", exc)
 
     def create_job(self, job_id: str, **kwargs) -> Dict[str, Any]:
         """Create a new job entry with initial status."""
@@ -28,6 +106,7 @@ class JobStore:
                 **kwargs,
             }
             self._jobs[job_id] = job_data
+            self._persist()
             return job_data.copy()
 
     def update_job(self, job_id: str, **kwargs) -> Optional[Dict[str, Any]]:
@@ -36,6 +115,7 @@ class JobStore:
             if job_id not in self._jobs:
                 return None
             self._jobs[job_id].update(kwargs)
+            self._persist()
             return self._jobs[job_id].copy()
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -54,6 +134,7 @@ class JobStore:
         with self._lock:
             if job_id in self._jobs:
                 del self._jobs[job_id]
+                self._persist()
                 return True
             return False
 

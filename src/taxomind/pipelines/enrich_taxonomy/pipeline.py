@@ -58,6 +58,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "enrich_embedding_model",
                     "params:enrich_taxonomy.k_similar_labels",
                     "params:embedding_prefix",
+                    "params:embedding.batch_size",
                 ],
                 outputs="taxonomy_with_similar",
                 name="build_similar_labels",

@@ -15,7 +15,9 @@ from taxomind.services.api.taxonomy_models import (
 )
 from taxomind.services.api.taxonomy_service import (
     TaxonomyPipelineService,
-    get_taxonomy_service,
+    get_taxonomy_build_service,
+    get_taxonomy_create_service,
+    get_taxonomy_enrich_service,
 )
 from taxomind.storage.job_store import JobStore, get_job_store
 
@@ -31,7 +33,7 @@ router = APIRouter(prefix="", tags=["taxonomies"])
 async def create_taxonomy(
     request: TaxonomyRequest,
     background_tasks: BackgroundTasks,
-    service: TaxonomyPipelineService = Depends(get_taxonomy_service),
+    service: TaxonomyPipelineService = Depends(get_taxonomy_create_service),
     job_store: JobStore = Depends(get_job_store),
 ) -> TaxonomyJobResponse:
     """
@@ -54,11 +56,13 @@ async def create_taxonomy(
     """
     # Generate unique job ID
     job_id = str(uuid4())
+    taxonomy_key = request.taxonomy.key
 
     # Create job entry
     job_store.create_job(
         job_id=job_id,
         status="pending",
+        taxonomy_key=taxonomy_key,
         message="Taxonomy processing queued",
         created_at=datetime.now(UTC),
     )
@@ -67,13 +71,84 @@ async def create_taxonomy(
     background_tasks.add_task(
         service.run_pipeline,
         job_id=job_id,
-        taxonomy_data=request.taxonomy.model_dump(),
+        taxonomy_key=taxonomy_key,
+        taxonomy_data=request.model_dump(),
     )
 
     return TaxonomyJobResponse(
         job_id=job_id,
         status="pending",
         message="Taxonomy processing started",
+        created_at=datetime.now(UTC),
+    )
+
+
+@router.post(
+    "/taxonomies/{taxonomy_key}/enrich",
+    status_code=202,
+    response_model=TaxonomyJobResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def enrich_taxonomy(
+    taxonomy_key: str,
+    background_tasks: BackgroundTasks,
+    service: TaxonomyPipelineService = Depends(get_taxonomy_enrich_service),
+    job_store: JobStore = Depends(get_job_store),
+) -> TaxonomyJobResponse:
+    """Run the `enrich_taxonomy` pipeline asynchronously for one taxonomy."""
+    job_id = str(uuid4())
+    job_store.create_job(
+        job_id=job_id,
+        status="pending",
+        taxonomy_key=taxonomy_key,
+        message="Taxonomy enrichment queued",
+        created_at=datetime.now(UTC),
+    )
+    background_tasks.add_task(
+        service.run_pipeline,
+        job_id=job_id,
+        taxonomy_key=taxonomy_key,
+        taxonomy_data=None,
+    )
+    return TaxonomyJobResponse(
+        job_id=job_id,
+        status="pending",
+        message="Taxonomy enrichment started",
+        created_at=datetime.now(UTC),
+    )
+
+
+@router.post(
+    "/taxonomies/{taxonomy_key}/build",
+    status_code=202,
+    response_model=TaxonomyJobResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def build_taxonomy_index(
+    taxonomy_key: str,
+    background_tasks: BackgroundTasks,
+    service: TaxonomyPipelineService = Depends(get_taxonomy_build_service),
+    job_store: JobStore = Depends(get_job_store),
+) -> TaxonomyJobResponse:
+    """Run the `build_taxonomy` pipeline asynchronously for one taxonomy."""
+    job_id = str(uuid4())
+    job_store.create_job(
+        job_id=job_id,
+        status="pending",
+        taxonomy_key=taxonomy_key,
+        message="Taxonomy index build queued",
+        created_at=datetime.now(UTC),
+    )
+    background_tasks.add_task(
+        service.run_pipeline,
+        job_id=job_id,
+        taxonomy_key=taxonomy_key,
+        taxonomy_data=None,
+    )
+    return TaxonomyJobResponse(
+        job_id=job_id,
+        status="pending",
+        message="Taxonomy index build started",
         created_at=datetime.now(UTC),
     )
 

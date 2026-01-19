@@ -41,6 +41,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:embedding.cache_dir",
                     "params:embedding.local_files_only",
                     "params:embedding_prefix.query",
+                    "params:embedding.batch_size",
                 ],
                 outputs=["learning_embedded_updates_df", "learning_embed_stats"],
                 name="learning_embed_updates",

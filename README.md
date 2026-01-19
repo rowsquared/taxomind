@@ -4,33 +4,43 @@
 
 ## Purpose
 
-The taxomind project delivers a Kedro 0.19+ style workflow for modular, multilingual hierarchical text classification. Pipelines cover taxonomy embedding, zero-shot routing with judge-based arbitration, and multilingual supervised training once labeled samples exist. The codebase mirrors Kedro's latest recommendations so it can plug into production-grade feature stores, experiment tracking, and FastAPI services without custom scaffolding.
+taxomind is a Kedro project for modular, multilingual **hierarchical** text classification against deep taxonomies (e.g. ISCO / ISIC). It builds multi-view taxonomy embeddings, runs true top-down routing with explicit stopping (internal nodes are valid predictions), supports per-node incremental learning via evidence centroids, and includes error-analysis utilities.
 
 ## Getting Started
 
 1. Create and activate a Python 3.10+ virtual environment.
 2. Install dependencies with `pip install -r requirements.txt`.
 3. Update `conf/base/parameters.yml` with your embedding or inference configuration.
-4. Use `kedro run -p embedding` to build multilingual taxonomy embeddings, followed by `kedro run -p zero_shot` or `kedro run -p supervised` as needed.
+4. Run the pipelines you need (see below), or start the FastAPI server in `scripts/start_api.py`.
 
 ## Pipelines
 
 | Pipeline | Description |
 | --- | --- |
-| `embedding` | Validates taxonomy tables, enriches multilingual labels with definitions/examples, and encodes them using `BAAI/bge-m3`. |
-| `zero_shot` | Performs top-down routing, bottom-up validation, and multilingual LLM judge arbitration for on-the-fly classification. |
-| `supervised` | Prepares multilingual corpora, fine-tunes SetFit/XLM-R style models per taxonomic level, and evaluates metrics by language. |
+| `enrich_taxonomy` | Optional: enrich taxonomy definitions/examples (LLM-assisted) and save an enriched taxonomy definition. |
+| `build_taxonomy` | Build a per-taxonomy index with multi-view embeddings (label/definition/examples) for fast retrieval + routing. |
+| `build_taxonomy_from_request` | Same as `build_taxonomy`, but reads taxonomy JSON requests (used by the API `/taxonomies`). |
+| `inference` / `inference_batch` | Hierarchical inference: retrieval → induced subgraph → true top-down routing with explicit stopping + scoped validation. |
+| `learning_pipe` | Incremental learning: update per-node evidence centroids from `/learn` corrections (no ancestor drift). |
+| `error_analysis` | Produce standardized targets from datasets for downstream error analysis/debugging. |
 
 Each pipeline is modular so that intermediate datasets (taxonomy enrichment, embeddings, inference results, etc.) can be cached or swapped for external services.
 
 ## Services
 
-`src/taxomind/services/api/fastapi_app.py` exposes `/classify/zero-shot` and `/classify/supervised` endpoints. They rely on runners in `src/taxomind/services/models/` that orchestrate Kedro-ready utilities for inference and training. All request/response payloads accept multilingual text without forcing English locale assumptions.
+`src/taxomind/services/api/fastapi_app.py` exposes an async job API (Bearer token auth) that maps to the current Kedro pipelines:
+- `POST /taxonomies` and `GET /taxonomies/{job_id}/status` (create/build index from JSON request)
+- `POST /taxonomies/{taxonomy_key}/enrich` (run `enrich_taxonomy`)
+- `POST /taxonomies/{taxonomy_key}/build` (run `build_taxonomy`)
+- `POST /label` and `GET /label/{job_id}/status` (run `inference_batch` for labeling)
+- `POST /learn` and `GET /learn/{job_id}/status` (run `learning_pipe`)
+- `POST /error-analysis` and `GET /error-analysis/{job_id}/status` (run `error_analysis`)
+
+Testing guide: `docs/API_TESTING.md`.
 
 ## Multilingual Support
 • Embeddings support 100+ languages
-• Zero-shot routing and leaf validation are cross-lingual
-• Supervised training supports multilingual corpora
+• Routing/validation are cross-lingual (embedding-based)
 
 ## Development Workflow
 
@@ -44,4 +54,4 @@ Unit tests can target `taxomind.utils` helpers or pipeline nodes directly. Kedro
 
 ## Deployment
 
-Package the project with `pip install -e .` and run via `kedro run`. The FastAPI app can be launched with `uvicorn taxomind.services.api.fastapi_app:app --reload` once embeddings or supervised models have been materialized.
+Package the project with `pip install -e .` and run via `kedro run`. The FastAPI app can be launched with `uvicorn taxomind.services.api.fastapi_app:app --reload` once the taxonomy index has been built.

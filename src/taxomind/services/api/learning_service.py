@@ -1,4 +1,4 @@
-"""Service layer for running incremental training pipeline asynchronously."""
+"""Service layer for running the incremental learning (evidence update) pipeline asynchronously."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class LearningPipelineService:
-    """Service for executing incremental training pipeline with job tracking."""
+    """Service for executing incremental learning pipeline with job tracking."""
 
     _bootstrapped = False
 
