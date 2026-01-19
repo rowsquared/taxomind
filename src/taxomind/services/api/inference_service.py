@@ -13,6 +13,7 @@ from kedro.framework.startup import bootstrap_project
 from kedro.runner import SequentialRunner
 
 from taxomind.services.api.inference_models import InferenceResult, PredictionResult
+from taxomind.services.api.kedro_utils import release_catalog_datasets
 from taxomind.storage.job_store import get_job_store
 from taxomind.utils.text_utils import build_text_variable
 
@@ -130,74 +131,78 @@ class InferencePipelineService:
                 pipeline = pipelines[self.pipeline_name]
                 catalog = context.catalog
 
-                # Prepare hooks and run params
-                hook_manager = session._hook_manager
-                run_params = self._build_run_params(session, context)
-
-                hook_manager.hook.before_pipeline_run(
-                    run_params=run_params, pipeline=pipeline, catalog=catalog
-                )
-
-                # Execute pipeline
-                self.job_store.update_job(
-                    job_id,
-                    message="Performing classification",
-                )
-
-                runner = SequentialRunner()
                 try:
-                    run_result = runner.run(
-                        pipeline=pipeline,
-                        catalog=catalog,
-                        hook_manager=hook_manager,
-                        run_id=session.store["session_id"],
+                    # Prepare hooks and run params
+                    hook_manager = session._hook_manager
+                    run_params = self._build_run_params(session, context)
+
+                    hook_manager.hook.before_pipeline_run(
+                        run_params=run_params, pipeline=pipeline, catalog=catalog
                     )
-                except Exception as error:
-                    hook_manager.hook.on_pipeline_error(
-                        error=error,
+
+                    # Execute pipeline
+                    self.job_store.update_job(
+                        job_id,
+                        message="Performing classification",
+                    )
+
+                    runner = SequentialRunner()
+                    try:
+                        run_result = runner.run(
+                            pipeline=pipeline,
+                            catalog=catalog,
+                            hook_manager=hook_manager,
+                            run_id=session.store["session_id"],
+                        )
+                    except Exception as error:
+                        hook_manager.hook.on_pipeline_error(
+                            error=error,
+                            run_params=run_params,
+                            pipeline=pipeline,
+                            catalog=catalog,
+                        )
+                        raise
+
+                    hook_manager.hook.after_pipeline_run(
                         run_params=run_params,
+                        run_result=run_result,
                         pipeline=pipeline,
                         catalog=catalog,
                     )
-                    raise
 
-                hook_manager.hook.after_pipeline_run(
-                    run_params=run_params,
-                    run_result=run_result,
-                    pipeline=pipeline,
-                    catalog=catalog,
-                )
+                    # Get results from catalog
+                    self.job_store.update_job(
+                        job_id,
+                        message="Finalizing inference results",
+                    )
 
-                # Get results from catalog
-                self.job_store.update_job(
-                    job_id,
-                    message="Finalizing inference results",
-                )
+                    predictions_df = catalog.load("inference_predictions_df")
+                    taxonomy_df = catalog.load("inference_taxonomy_df")
+                    inference_result = self._format_results(
+                        taxonomy_key=taxonomy_key,
+                        predictions_df=predictions_df,
+                        taxonomy_df=taxonomy_df,
+                        query_id_to_sentence_id=query_id_to_sentence_id,
+                        sentence_texts=sentence_texts,
+                        ordered_sentence_ids=ordered_sentence_ids,
+                    )
 
-                predictions_df = catalog.load("inference_predictions_df")
-                taxonomy_df = catalog.load("inference_taxonomy_df")
-                inference_result = self._format_results(
-                    taxonomy_key=taxonomy_key,
-                    predictions_df=predictions_df,
-                    taxonomy_df=taxonomy_df,
-                    query_id_to_sentence_id=query_id_to_sentence_id,
-                    sentence_texts=sentence_texts,
-                    ordered_sentence_ids=ordered_sentence_ids,
-                )
-
-                # Pipeline completed successfully
-                logger.info(
-                    "Job %s: Inference completed for %d sentences",
-                    job_id,
-                    len(ordered_sentence_ids),
-                )
-                self.job_store.update_job(
-                    job_id,
-                    status="completed",
-                    message="Inference completed successfully",
-                    completed_at=datetime.now(UTC),
-                    result=inference_result.model_dump(),
-                )
+                    # Pipeline completed successfully
+                    logger.info(
+                        "Job %s: Inference completed for %d sentences",
+                        job_id,
+                        len(ordered_sentence_ids),
+                    )
+                    self.job_store.update_job(
+                        job_id,
+                        status="completed",
+                        message="Inference completed successfully",
+                        completed_at=datetime.now(UTC),
+                        result=inference_result.model_dump(),
+                    )
+                finally:
+                    release_catalog_datasets(catalog)
+                    run_result = None
 
         except Exception as e:
             # Pipeline failed

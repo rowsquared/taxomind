@@ -19,6 +19,7 @@ from taxomind.services.api.labeling_models import (
     SentenceError,
     SentenceSuggestion,
 )
+from taxomind.services.api.kedro_utils import release_catalog_datasets
 from taxomind.storage.job_store import get_job_store
 from taxomind.utils.text_utils import build_text_variable
 
@@ -103,79 +104,83 @@ class LabelingPipelineService:
                 pipeline = pipelines[self.pipeline_name]
                 catalog = context.catalog
 
-                # Prepare input data using MemoryDataset
-                self.job_store.update_job(
-                    job_id,
-                    progress=0.2,
-                    message="Preparing queries and loading taxonomy",
-                )
-
-                # Prepare hooks and run params
-                hook_manager = session._hook_manager
-                run_params = self._build_run_params(session, context)
-
-                hook_manager.hook.before_pipeline_run(
-                    run_params=run_params, pipeline=pipeline, catalog=catalog
-                )
-
-                # Execute pipeline
-                self.job_store.update_job(
-                    job_id,
-                    progress=0.3,
-                    message="Running inference pipeline",
-                )
-
-                runner = SequentialRunner()
                 try:
-                    run_result = runner.run(
-                        pipeline=pipeline,
-                        catalog=catalog,
-                        hook_manager=hook_manager,
-                        run_id=session.store["session_id"],
+                    # Prepare input data using MemoryDataset
+                    self.job_store.update_job(
+                        job_id,
+                        progress=0.2,
+                        message="Preparing queries and loading taxonomy",
                     )
-                except Exception as error:
-                    hook_manager.hook.on_pipeline_error(
-                        error=error,
+
+                    # Prepare hooks and run params
+                    hook_manager = session._hook_manager
+                    run_params = self._build_run_params(session, context)
+
+                    hook_manager.hook.before_pipeline_run(
+                        run_params=run_params, pipeline=pipeline, catalog=catalog
+                    )
+
+                    # Execute pipeline
+                    self.job_store.update_job(
+                        job_id,
+                        progress=0.3,
+                        message="Running inference pipeline",
+                    )
+
+                    runner = SequentialRunner()
+                    try:
+                        run_result = runner.run(
+                            pipeline=pipeline,
+                            catalog=catalog,
+                            hook_manager=hook_manager,
+                            run_id=session.store["session_id"],
+                        )
+                    except Exception as error:
+                        hook_manager.hook.on_pipeline_error(
+                            error=error,
+                            run_params=run_params,
+                            pipeline=pipeline,
+                            catalog=catalog,
+                        )
+                        raise
+
+                    hook_manager.hook.after_pipeline_run(
                         run_params=run_params,
+                        run_result=run_result,
                         pipeline=pipeline,
                         catalog=catalog,
                     )
-                    raise
 
-                hook_manager.hook.after_pipeline_run(
-                    run_params=run_params,
-                    run_result=run_result,
-                    pipeline=pipeline,
-                    catalog=catalog,
-                )
+                    # Get results from catalog
+                    self.job_store.update_job(
+                        job_id,
+                        progress=0.9,
+                        message="Formatting results",
+                    )
 
-                # Get results from catalog
-                self.job_store.update_job(
-                    job_id,
-                    progress=0.9,
-                    message="Formatting results",
-                )
+                    predictions_df = catalog.load("inference_predictions_df")
 
-                predictions_df = catalog.load("inference_predictions_df")
+                    # Transform results to API format
+                    labeling_response = self._format_results(
+                        batch_id,
+                        predictions_df,
+                        query_id_to_sentence_id=query_id_to_sentence_id,
+                        preflight_errors=preflight_errors,
+                    )
 
-                # Transform results to API format
-                labeling_response = self._format_results(
-                    batch_id,
-                    predictions_df,
-                    query_id_to_sentence_id=query_id_to_sentence_id,
-                    preflight_errors=preflight_errors,
-                )
-
-                # Pipeline completed successfully
-                logger.info(f"Job {job_id}: Pipeline completed successfully")
-                self.job_store.update_job(
-                    job_id,
-                    status="completed",
-                    progress=1.0,
-                    message="Labeling completed successfully",
-                    completed_at=datetime.now(UTC),
-                    result=labeling_response.model_dump(),
-                )
+                    # Pipeline completed successfully
+                    logger.info(f"Job {job_id}: Pipeline completed successfully")
+                    self.job_store.update_job(
+                        job_id,
+                        status="completed",
+                        progress=1.0,
+                        message="Labeling completed successfully",
+                        completed_at=datetime.now(UTC),
+                        result=labeling_response.model_dump(),
+                    )
+                finally:
+                    release_catalog_datasets(catalog)
+                    run_result = None
 
         except Exception as e:
             # Pipeline failed

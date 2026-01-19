@@ -12,6 +12,7 @@ from kedro.framework.session import KedroSession
 from kedro.framework.startup import bootstrap_project
 from kedro.runner import SequentialRunner
 
+from taxomind.services.api.kedro_utils import release_catalog_datasets
 from taxomind.storage.job_store import get_job_store
 
 logger = logging.getLogger(__name__)
@@ -79,56 +80,60 @@ class TaxonomyPipelineService:
                 pipeline = pipelines[self.pipeline_name]
                 catalog = context.catalog
 
-                self.job_store.update_job(job_id, progress=0.2, message="Starting Kedro run")
-
-                # Prepare hooks and run params
-                hook_manager = session._hook_manager
-                run_params = self._build_run_params(session, context)
-
-                hook_manager.hook.before_pipeline_run(
-                    run_params=run_params, pipeline=pipeline, catalog=catalog
-                )
-
-                # Execute pipeline
-                self.job_store.update_job(
-                    job_id,
-                    progress=0.3,
-                    message="Running pipeline nodes",
-                )
-
-                runner = SequentialRunner()
                 try:
-                    run_result = runner.run(
-                        pipeline=pipeline,
-                        catalog=catalog,
-                        hook_manager=hook_manager,
-                        run_id=session.store["session_id"],
+                    self.job_store.update_job(job_id, progress=0.2, message="Starting Kedro run")
+
+                    # Prepare hooks and run params
+                    hook_manager = session._hook_manager
+                    run_params = self._build_run_params(session, context)
+
+                    hook_manager.hook.before_pipeline_run(
+                        run_params=run_params, pipeline=pipeline, catalog=catalog
                     )
-                except Exception as error:
-                    hook_manager.hook.on_pipeline_error(
-                        error=error,
+
+                    # Execute pipeline
+                    self.job_store.update_job(
+                        job_id,
+                        progress=0.3,
+                        message="Running pipeline nodes",
+                    )
+
+                    runner = SequentialRunner()
+                    try:
+                        run_result = runner.run(
+                            pipeline=pipeline,
+                            catalog=catalog,
+                            hook_manager=hook_manager,
+                            run_id=session.store["session_id"],
+                        )
+                    except Exception as error:
+                        hook_manager.hook.on_pipeline_error(
+                            error=error,
+                            run_params=run_params,
+                            pipeline=pipeline,
+                            catalog=catalog,
+                        )
+                        raise
+
+                    hook_manager.hook.after_pipeline_run(
                         run_params=run_params,
+                        run_result=run_result,
                         pipeline=pipeline,
                         catalog=catalog,
                     )
-                    raise
 
-                hook_manager.hook.after_pipeline_run(
-                    run_params=run_params,
-                    run_result=run_result,
-                    pipeline=pipeline,
-                    catalog=catalog,
-                )
-
-                # Pipeline completed successfully
-                logger.info(f"Job {job_id}: Pipeline completed successfully")
-                self.job_store.update_job(
-                    job_id,
-                    status="completed",
-                    progress=1.0,
-                    message="Pipeline completed successfully",
-                    completed_at=datetime.now(UTC),
-                )
+                    # Pipeline completed successfully
+                    logger.info(f"Job {job_id}: Pipeline completed successfully")
+                    self.job_store.update_job(
+                        job_id,
+                        status="completed",
+                        progress=1.0,
+                        message="Pipeline completed successfully",
+                        completed_at=datetime.now(UTC),
+                    )
+                finally:
+                    release_catalog_datasets(catalog)
+                    run_result = None
 
         except Exception as e:
             # Pipeline failed
@@ -194,6 +199,7 @@ class TaxonomyPipelineService:
             "runner": "SequentialRunner",
             "only_missing_outputs": False,
         }
+
 
 
 # Singleton instances per pipeline name

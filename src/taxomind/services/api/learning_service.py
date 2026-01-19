@@ -14,6 +14,7 @@ from kedro.framework.startup import bootstrap_project
 from kedro.io import MemoryDataset
 from kedro.runner import SequentialRunner
 
+from taxomind.services.api.kedro_utils import release_catalog_datasets
 from taxomind.storage.job_store import get_job_store
 
 logger = logging.getLogger(__name__)
@@ -83,129 +84,133 @@ class LearningPipelineService:
                 pipeline = pipelines[self.pipeline_name]
                 catalog = context.catalog
 
-                # Prepare input data
-                self.job_store.update_job(
-                    job_id,
-                    message="Validating training data",
-                )
-
-                # Create job config
-                job_config = {
-                    "jobId": job_id,
-                    "taxonomyKey": taxonomy_key,
-                    "createdAt": datetime.now(UTC).isoformat(),
-                }
-
-                # Persist job inputs for traceability and feed them to the pipeline
-                self._persist_job_inputs(job_id, job_config, training_data)
-                catalog["job_config"] = MemoryDataset(job_config)
-                catalog["api_training_payload"] = MemoryDataset(training_data)
-
-                # Ensure directories exist for partitioned datasets
-                training_dir = self.project_path / "data" / "06_training"
-                training_dir.mkdir(parents=True, exist_ok=True)
-                version_dir = self.project_path / "data" / "07_model_output" / "versions"
-                version_dir.mkdir(parents=True, exist_ok=True)
-
-                # Handle empty partitioned datasets by providing default empty dicts
-                # Check if training data directory has any CSV files
-                if not list(training_dir.glob("*.csv")):
-                    logger.info("No existing training data found, providing empty dataset")
-                    catalog["existing_training_data"] = MemoryDataset({})
-
-                # Check if version metadata directory has any JSON files
-                if not list(version_dir.glob("*.json")):
-                    logger.info("No existing version metadata found, providing empty dataset")
-                    catalog["existing_model_version_metadata"] = MemoryDataset({})
-
-                # Prepare hooks and run params
-                hook_manager = session._hook_manager
-                run_params = self._build_run_params(session, context)
-
-                hook_manager.hook.before_pipeline_run(
-                    run_params=run_params, pipeline=pipeline, catalog=catalog
-                )
-
-                # Execute pipeline
-                self.job_store.update_job(
-                    job_id,
-                    message="Training models",
-                )
-
-                runner = SequentialRunner()
                 try:
-                    run_result = runner.run(
-                        pipeline=pipeline,
-                        catalog=catalog,
-                        hook_manager=hook_manager,
-                        run_id=session.store["session_id"],
+                    # Prepare input data
+                    self.job_store.update_job(
+                        job_id,
+                        message="Validating training data",
                     )
-                except Exception as error:
-                    hook_manager.hook.on_pipeline_error(
-                        error=error,
+
+                    # Create job config
+                    job_config = {
+                        "jobId": job_id,
+                        "taxonomyKey": taxonomy_key,
+                        "createdAt": datetime.now(UTC).isoformat(),
+                    }
+
+                    # Persist job inputs for traceability and feed them to the pipeline
+                    self._persist_job_inputs(job_id, job_config, training_data)
+                    catalog["job_config"] = MemoryDataset(job_config)
+                    catalog["api_training_payload"] = MemoryDataset(training_data)
+
+                    # Ensure directories exist for partitioned datasets
+                    training_dir = self.project_path / "data" / "06_training"
+                    training_dir.mkdir(parents=True, exist_ok=True)
+                    version_dir = self.project_path / "data" / "07_model_output" / "versions"
+                    version_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Handle empty partitioned datasets by providing default empty dicts
+                    # Check if training data directory has any CSV files
+                    if not list(training_dir.glob("*.csv")):
+                        logger.info("No existing training data found, providing empty dataset")
+                        catalog["existing_training_data"] = MemoryDataset({})
+
+                    # Check if version metadata directory has any JSON files
+                    if not list(version_dir.glob("*.json")):
+                        logger.info("No existing version metadata found, providing empty dataset")
+                        catalog["existing_model_version_metadata"] = MemoryDataset({})
+
+                    # Prepare hooks and run params
+                    hook_manager = session._hook_manager
+                    run_params = self._build_run_params(session, context)
+
+                    hook_manager.hook.before_pipeline_run(
+                        run_params=run_params, pipeline=pipeline, catalog=catalog
+                    )
+
+                    # Execute pipeline
+                    self.job_store.update_job(
+                        job_id,
+                        message="Training models",
+                    )
+
+                    runner = SequentialRunner()
+                    try:
+                        run_result = runner.run(
+                            pipeline=pipeline,
+                            catalog=catalog,
+                            hook_manager=hook_manager,
+                            run_id=session.store["session_id"],
+                        )
+                    except Exception as error:
+                        hook_manager.hook.on_pipeline_error(
+                            error=error,
+                            run_params=run_params,
+                            pipeline=pipeline,
+                            catalog=catalog,
+                        )
+                        raise
+
+                    hook_manager.hook.after_pipeline_run(
                         run_params=run_params,
+                        run_result=run_result,
                         pipeline=pipeline,
                         catalog=catalog,
                     )
-                    raise
 
-                hook_manager.hook.after_pipeline_run(
-                    run_params=run_params,
-                    run_result=run_result,
-                    pipeline=pipeline,
-                    catalog=catalog,
-                )
-
-                # Get results from catalog (in-memory datasets)
-                self.job_store.update_job(
-                    job_id,
-                    message="Finalizing training results",
-                )
-
-                update_summary = self._try_load_dataset(
-                    catalog, "learning_update_summary"
-                )
-
-                if update_summary:
-                    result = self._format_evidence_results(update_summary)
-                else:
-                    # Load results from in-memory datasets
-                    training_summary_dict = catalog.load("training_summary_dict")
-                    training_metrics_dict = catalog.load("training_metrics_dict")
-                    version_metadata_dict = catalog.load(
-                        "updated_version_metadata_dict"
+                    # Get results from catalog (in-memory datasets)
+                    self.job_store.update_job(
+                        job_id,
+                        message="Finalizing training results",
                     )
 
-                    # Extract data for this specific taxonomy
-                    training_summary = training_summary_dict.get(taxonomy_key, {})
-                    training_metrics = training_metrics_dict.get(taxonomy_key, {})
-                    version_metadata = version_metadata_dict.get(taxonomy_key, {})
-
-                    # Load appended training data stats
-                    appended_data = catalog.load("appended_training_data")
-                    total_samples = len(appended_data)
-
-                    # Calculate new samples count
-                    new_samples = len(training_data.get("sentences", []))
-
-                    # Format results
-                    result = self._format_results(
-                        training_summary,
-                        training_metrics,
-                        version_metadata,
-                        new_samples,
-                        total_samples,
+                    update_summary = self._try_load_dataset(
+                        catalog, "learning_update_summary"
                     )
 
-                # Pipeline completed successfully
-                logger.info(f"Job {job_id}: Pipeline completed successfully")
-                self.job_store.update_job(
-                    job_id,
-                    status="completed",
-                    message="Training completed successfully",
-                    completed_at=datetime.now(UTC),
-                    result=result,
-                )
+                    if update_summary:
+                        result = self._format_evidence_results(update_summary)
+                    else:
+                        # Load results from in-memory datasets
+                        training_summary_dict = catalog.load("training_summary_dict")
+                        training_metrics_dict = catalog.load("training_metrics_dict")
+                        version_metadata_dict = catalog.load(
+                            "updated_version_metadata_dict"
+                        )
+
+                        # Extract data for this specific taxonomy
+                        training_summary = training_summary_dict.get(taxonomy_key, {})
+                        training_metrics = training_metrics_dict.get(taxonomy_key, {})
+                        version_metadata = version_metadata_dict.get(taxonomy_key, {})
+
+                        # Load appended training data stats
+                        appended_data = catalog.load("appended_training_data")
+                        total_samples = len(appended_data)
+
+                        # Calculate new samples count
+                        new_samples = len(training_data.get("sentences", []))
+
+                        # Format results
+                        result = self._format_results(
+                            training_summary,
+                            training_metrics,
+                            version_metadata,
+                            new_samples,
+                            total_samples,
+                        )
+
+                    # Pipeline completed successfully
+                    logger.info(f"Job {job_id}: Pipeline completed successfully")
+                    self.job_store.update_job(
+                        job_id,
+                        status="completed",
+                        message="Training completed successfully",
+                        completed_at=datetime.now(UTC),
+                        result=result,
+                    )
+                finally:
+                    release_catalog_datasets(catalog)
+                    run_result = None
 
         except Exception as e:
             # Pipeline failed

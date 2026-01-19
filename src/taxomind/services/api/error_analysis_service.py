@@ -13,6 +13,7 @@ from kedro.framework.session import KedroSession
 from kedro.framework.startup import bootstrap_project
 from kedro.runner import SequentialRunner
 
+from taxomind.services.api.kedro_utils import release_catalog_datasets
 from taxomind.storage.job_store import get_job_store
 
 logger = logging.getLogger(__name__)
@@ -51,54 +52,58 @@ class ErrorAnalysisPipelineService:
                 pipeline = pipelines[self.pipeline_name]
                 catalog = context.catalog
 
-                hook_manager = session._hook_manager
-                run_params = self._build_run_params(session, context)
-
-                hook_manager.hook.before_pipeline_run(
-                    run_params=run_params, pipeline=pipeline, catalog=catalog
-                )
-
-                self.job_store.update_job(
-                    job_id,
-                    progress=0.3,
-                    message="Running error analysis nodes",
-                )
-
-                runner = SequentialRunner()
                 try:
-                    run_result = runner.run(
-                        pipeline=pipeline,
-                        catalog=catalog,
-                        hook_manager=hook_manager,
-                        run_id=session.store["session_id"],
+                    hook_manager = session._hook_manager
+                    run_params = self._build_run_params(session, context)
+
+                    hook_manager.hook.before_pipeline_run(
+                        run_params=run_params, pipeline=pipeline, catalog=catalog
                     )
-                except Exception as error:
-                    hook_manager.hook.on_pipeline_error(
-                        error=error,
+
+                    self.job_store.update_job(
+                        job_id,
+                        progress=0.3,
+                        message="Running error analysis nodes",
+                    )
+
+                    runner = SequentialRunner()
+                    try:
+                        run_result = runner.run(
+                            pipeline=pipeline,
+                            catalog=catalog,
+                            hook_manager=hook_manager,
+                            run_id=session.store["session_id"],
+                        )
+                    except Exception as error:
+                        hook_manager.hook.on_pipeline_error(
+                            error=error,
+                            run_params=run_params,
+                            pipeline=pipeline,
+                            catalog=catalog,
+                        )
+                        raise
+
+                    hook_manager.hook.after_pipeline_run(
                         run_params=run_params,
+                        run_result=run_result,
                         pipeline=pipeline,
                         catalog=catalog,
                     )
-                    raise
 
-                hook_manager.hook.after_pipeline_run(
-                    run_params=run_params,
-                    run_result=run_result,
-                    pipeline=pipeline,
-                    catalog=catalog,
-                )
+                    self.job_store.update_job(
+                        job_id,
+                        progress=0.9,
+                        message="Summarizing outputs",
+                    )
 
-                self.job_store.update_job(
-                    job_id,
-                    progress=0.9,
-                    message="Summarizing outputs",
-                )
+                    classifai = catalog.load("error_analysis_classifai_targets")
+                    training = catalog.load("error_analysis_taxonomy_training_targets")
+                    sentences = catalog.load("error_analysis_training_sentences_targets")
 
-                classifai = catalog.load("error_analysis_classifai_targets")
-                training = catalog.load("error_analysis_taxonomy_training_targets")
-                sentences = catalog.load("error_analysis_training_sentences_targets")
-
-                result = self._summarize(classifai, training, sentences)
+                    result = self._summarize(classifai, training, sentences)
+                finally:
+                    release_catalog_datasets(catalog)
+                    run_result = None
 
             self.job_store.update_job(
                 job_id,
@@ -181,4 +186,3 @@ def get_error_analysis_service() -> ErrorAnalysisPipelineService:
     if _service_instance is None:
         _service_instance = ErrorAnalysisPipelineService()
     return _service_instance
-
