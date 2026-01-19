@@ -53,14 +53,16 @@ if __name__ == "__main__":
     else:
         print("⚠ Authentication disabled (API_AUTH_ENABLED=false)")
 
+    port = int(os.getenv("PORT", "3000"))
+
     print("\nStarting Taxomind API server (production mode)...")
-    print("API will be available at: http://0.0.0.0:8000")
+    print(f"API will be available at: http://0.0.0.0:{port}")
     print("\nPress CTRL+C to stop the server\n")
 
     uvicorn.run(
         "taxomind.services.api.fastapi_app:app",
         host="0.0.0.0",
-        port=8000,
+        port=port,
         reload=False,  # Production mode - no auto-reload
         log_level="info",
         workers=1,  # Can be increased based on your server capacity

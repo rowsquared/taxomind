@@ -46,7 +46,7 @@ ENV PYTHONPATH=/app/src
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"
+    CMD python -c "import os,urllib.request; port=os.getenv('PORT','3000'); urllib.request.urlopen(f'http://localhost:{port}/health').read()"
 
 # Start server in production mode
 CMD ["python", "scripts/start_api_prod.py"]
