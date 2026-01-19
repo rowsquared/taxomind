@@ -90,6 +90,8 @@ inference:
                  # Example: Separates "Legislator" from "Teacher" branches
                  # Higher values = more exploration, lower values = more focused
 
+  enable_beam_selection: true  # Toggle beam selection; when false route all induced L1 roots
+
   # Routing parameters (asymmetric stopping)
   min_descent_gap: 0.05  # Minimum score gap between best/second sibling to descend
                           # Higher values = more conservative descent (stop earlier)

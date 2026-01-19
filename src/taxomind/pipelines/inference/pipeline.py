@@ -71,6 +71,7 @@ def create_pipeline(**kwargs) -> Pipeline:
     Parameters:
         inference.retrieval_k: Number of candidates to retrieve (default 20)
         inference.beam_count: Number of root beams to select (default 2)
+        inference.enable_beam_selection: Toggle beam selection vs routing all L1 roots
         inference.min_descent_gap: Sibling separation threshold (default 0.05)
         inference.parent_veto_margin: Parent competitiveness margin (default 0.05)
         inference.enable_parent_veto: Toggle for parent competitiveness stop
@@ -167,6 +168,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "inference_retrieval_index",
                     "params:inference.retrieval_k",
                     "params:inference.beam_count",
+                    "params:inference.enable_beam_selection",
                 ],
                 outputs="inference_candidates_df",
                 name="batch_retrieve_candidates_node",
@@ -255,6 +257,7 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
     Parameters:
         inference.retrieval_k: Number of candidates to retrieve (default 20)
         inference.beam_count: Number of root beams to select (default 2)
+        inference.enable_beam_selection: Toggle beam selection vs routing all L1 roots
         inference.min_descent_gap: Sibling separation threshold (default 0.05)
         inference.parent_veto_margin: Parent competitiveness margin (default 0.05)
         inference.enable_parent_veto: Toggle for parent competitiveness stop
@@ -356,6 +359,7 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
                     "inference_retrieval_index",
                     "params:inference.retrieval_k",
                     "params:inference.beam_count",
+                    "params:inference.enable_beam_selection",
                 ],
                 outputs="inference_candidates_df",
                 name="batch_retrieve_candidates_node",

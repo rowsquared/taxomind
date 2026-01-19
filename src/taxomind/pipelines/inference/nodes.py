@@ -592,6 +592,7 @@ def retrieve_candidates(
     retrieval_index: Dict[str, Any],
     retrieval_k: int = 10,
     beam_count: int = 2,
+    enable_beam_selection: bool = True,
 ) -> Dict[str, Any]:
     """
     Retrieve and refine candidates using structural closure, sibling completion,
@@ -602,8 +603,8 @@ def retrieve_candidates(
     2. Compute ancestor closure A (paths to roots)
     3. Complete siblings S for ambiguity checks: children(A ∪ {__root__})
     4. Form candidate set V = R ∪ A ∪ S (induced subgraph)
-    5. Aggregate evidence by root (L1) for beam selection
-    6. Select top-B root beams (prevents semantic dilution)
+    5. (Optional) Aggregate evidence by root (L1) for beam selection
+    6. (Optional) Select top-B root beams (prevents semantic dilution); otherwise route all induced L1 roots
 
     Variant 2: Induced Subgraph Routing
     - Ancestor closure ensures path connectivity
@@ -616,6 +617,7 @@ def retrieve_candidates(
             (contains embeddings, codes, code_to_pos, code_to_parent)
         retrieval_k: Number of initial candidates to retrieve
         beam_count: Number of root beams to select (default 2)
+        enable_beam_selection: Toggle beam selection; when false, route all L1 roots in V
 
     Returns:
         Dict with:
@@ -624,13 +626,13 @@ def retrieve_candidates(
         - 'V_codes': set of candidate codes (R ∪ A)
         - 'ancestors': set of ancestor codes (A)
         - 'siblings': set of sibling codes (S)
-        - 'beam_roots': List[str] of selected L1 root codes
+        - 'beam_roots': List[str] of L1 roots to route (top-B beams or all L1 in V)
         - 'root_evidence': Dict[root -> List[score]] for beam selection
 
     Spec Reference:
         Module 2 — Inference, Step 6: Retrieve candidates
         Structural refinement: R ∪ A ∪ S (ancestor + sibling completion)
-        Beam selection: Use retrieval evidence as prior
+        Beam selection (optional): Use retrieval evidence as prior
 
     Failure Mode Prevention:
         - Semantic dilution: Beam selection prevents mixing "Legislator" +
@@ -685,42 +687,54 @@ def retrieve_candidates(
         f"|S|={len(S)}, |V|={len(V)}"
     )
 
-    # Step 5: Aggregate evidence by root (L1) for beam selection
-    # Helper: Get L1 ancestor (root) for a code
-    def get_root_ancestor(code: str) -> str:
-        """Traverse to L1 root."""
-        current = code
-        path = [current]
-        while current and current != "__root__":
-            parent = code_to_parent.get(current)
-            if parent == "__root__":
-                break  # current is L1 root
-            path.append(parent)
-            current = parent
-        # Return first node in path whose parent is __root__
-        for node in reversed(path):
-            if code_to_parent.get(node) == "__root__":
-                return node
-        return path[0]  # Fallback
-
+    # Step 5: Aggregate evidence by root (L1) for beam selection (optional)
     root_evidence = defaultdict(list)
-    for code in retrieved_codes:
-        root = get_root_ancestor(code)
-        root_evidence[root].append(retrieved_scores[code])
+    beam_roots = []
 
-    # Step 6: Select top-B roots by evidence mass (sum of scores)
-    beam_roots_ranked = sorted(
-        root_evidence.items(),
-        key=lambda x: sum(x[1]),  # Sum of retrieval scores
-        reverse=True
-    )[:beam_count]
+    if enable_beam_selection:
+        # Helper: Get L1 ancestor (root) for a code
+        def get_root_ancestor(code: str) -> str:
+            """Traverse to L1 root."""
+            current = code
+            path = [current]
+            while current and current != "__root__":
+                parent = code_to_parent.get(current)
+                if parent == "__root__":
+                    break  # current is L1 root
+                path.append(parent)
+                current = parent
+            # Return first node in path whose parent is __root__
+            for node in reversed(path):
+                if code_to_parent.get(node) == "__root__":
+                    return node
+            return path[0]  # Fallback
 
-    beam_roots = [root for root, _ in beam_roots_ranked]
+        for code in retrieved_codes:
+            root = get_root_ancestor(code)
+            root_evidence[root].append(retrieved_scores[code])
 
-    logger.info(
-        f"Beam selection: {len(root_evidence)} roots found, "
-        f"selected top-{beam_count}: {beam_roots}"
-    )
+        # Step 6: Select top-B roots by evidence mass (sum of scores)
+        beam_roots_ranked = sorted(
+            root_evidence.items(),
+            key=lambda x: (sum(x[1]) / len(x[1])) if x[1] else float("-inf"),
+            reverse=True
+        )[:beam_count]
+
+        beam_roots = [root for root, _ in beam_roots_ranked]
+
+        logger.info(
+            f"Beam selection: {len(root_evidence)} roots found, "
+            f"selected top-{beam_count}: {beam_roots}"
+        )
+    else:
+        beam_roots = [
+            child for child in code_to_children.get("__root__", [])
+            if child in V
+        ]
+        logger.info(
+            "Beam selection disabled: routing over %d induced root nodes",
+            len(beam_roots),
+        )
 
     return {
         "retrieved_codes": retrieved_codes,
@@ -1343,6 +1357,7 @@ def batch_retrieve_candidates(
     retrieval_index: Dict[str, Any],
     retrieval_k: int = 10,
     beam_count: int = 2,
+    enable_beam_selection: bool = True,
 ) -> pd.DataFrame:
     """
     Retrieve candidates for each query in batch.
@@ -1352,6 +1367,7 @@ def batch_retrieve_candidates(
         retrieval_index: Label-based index from build_retrieval_index
         retrieval_k: Number of candidates to retrieve
         beam_count: Number of root beams to select
+        enable_beam_selection: Toggle beam selection vs routing all L1 roots
 
     Returns:
         DataFrame with added columns:
@@ -1373,6 +1389,7 @@ def batch_retrieve_candidates(
                 retrieval_index=retrieval_index,
                 retrieval_k=retrieval_k,
                 beam_count=beam_count,
+                enable_beam_selection=enable_beam_selection,
             )
             df.at[idx, "candidates"] = candidates_dict
         except Exception as e:
@@ -1686,6 +1703,7 @@ def batch_inference(
     taxonomy_df: pd.DataFrame,
     retrieval_k: int = 10,
     beam_count: int = 2,
+    enable_beam_selection: bool = True,
     min_descent_gap: float = 0.05,
     parent_veto_margin: float = 0.05,
     enable_parent_veto: bool = True,
@@ -1710,6 +1728,8 @@ def batch_inference(
         taxonomy_graph: Parent-child adjacency
         taxonomy_df: Taxonomy DataFrame (for label lookup)
         retrieval_k: Number of candidates to retrieve
+        beam_count: Number of root beams to select
+        enable_beam_selection: Toggle beam selection vs routing all L1 roots
         min_descent_gap: Sibling separation threshold
         parent_veto_margin: Parent competitiveness margin
         enable_parent_veto: Toggle for parent competitiveness stop
@@ -1750,6 +1770,7 @@ def batch_inference(
         retrieval_index=retrieval_index,
         retrieval_k=retrieval_k,
         beam_count=beam_count,
+        enable_beam_selection=enable_beam_selection,
     )
     routing_df = batch_route_topdown(
         candidates_df=candidates_df,

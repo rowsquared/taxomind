@@ -63,6 +63,24 @@ taxonomy_definition:
       quotechar: '"' 
   filename_suffix: .csv
 
+taxonomy_definition_for_testing:
+  type: partitions.PartitionedDataset
+  path: data/03_primary/taxonomies/testing
+  dataset:
+    type: pandas.CSVDataset
+    load_args:
+      dtype:
+        code: str
+        parent_id: str
+        definition: str
+        examples: str
+    save_args:
+      encoding: utf-8
+      index: false
+      quoting: 1      # csv.QUOTE_ALL
+      quotechar: '"' 
+  filename_suffix: .csv
+
 
 taxonomy_definition_llm:
   type: partitions.PartitionedDataset
