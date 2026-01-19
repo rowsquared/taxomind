@@ -29,8 +29,17 @@ RUN pip install --upgrade pip setuptools wheel && \
 COPY src/ ./src/
 COPY conf/ ./conf/
 COPY scripts/ ./scripts/
-COPY data/ ./data/
 COPY pyproject.toml ./pyproject.toml
+
+# Create data folders for runtime; mount /app/data as a volume in Coolify for persistence
+RUN mkdir -p \
+    /app/data/01_raw \
+    /app/data/02_intermediate \
+    /app/data/03_primary \
+    /app/data/06_training \
+    /app/data/07_model_output \
+    /app/data/08_temp_training \
+    /app/data/09_job_store
 
 # Set Python path
 ENV PYTHONPATH=/app/src
