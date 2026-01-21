@@ -4,7 +4,7 @@
 
 classifai_validation_data:
   type: pandas.CSVDataset
-  filepath: data/01_raw/taxonomies/validation_data/export-2026-01-12T16_07_07.162Z.csv
+  filepath: data/01_raw/taxonomies/validation_data/export-2026-01-19T14_43_24.581Z.csv
   load_args:
     encoding: utf-8
     dtype:
@@ -12,6 +12,38 @@ classifai_validation_data:
       ISCO_2: str
       ISCO_3: str
       ISCO_4: str
+      ISIC_1: str
+      ISIC_2: str
+      ISIC_3: str
+      ISIC_4: str
+
+
+classifai_validation_data_test:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/taxonomies/validation_data/validation_test.csv
+  load_args:
+    encoding: utf-8
+
+
+classifai_validation_data_test_isco:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/taxonomies/validation_data/validation_test_isco.csv
+  load_args:
+    encoding: utf-8
+    dtype:
+      ISCO_1: str
+      ISCO_2: str
+      ISCO_3: str
+      ISCO_4: str
+
+
+
+classifai_validation_data_test_isic:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/taxonomies/validation_data/validation_test_isic.csv
+  load_args:
+    encoding: utf-8
+    dtype:
       ISIC_1: str
       ISIC_2: str
       ISIC_3: str
