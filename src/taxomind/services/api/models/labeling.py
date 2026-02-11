@@ -8,16 +8,6 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-class SentenceFields(BaseModel):
-    """Dynamic fields for a sentence (Job Description, Industry, etc.)."""
-
-    model_config = {"extra": "allow"}  # Allow any additional fields
-
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
-        """Return all fields as a dictionary."""
-        return super().model_dump(**kwargs)
-
-
 class LabelingSentence(BaseModel):
     """Individual sentence to be labeled."""
 

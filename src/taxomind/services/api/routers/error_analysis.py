@@ -8,11 +8,11 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from taxomind.services.api.auth import verify_token
-from taxomind.services.api.error_analysis_models import (
+from taxomind.services.api.models.error_analysis import (
     ErrorAnalysisJobResponse,
     ErrorAnalysisStatusResponse,
 )
-from taxomind.services.api.error_analysis_service import (
+from taxomind.services.api.services.error_analysis import (
     ErrorAnalysisPipelineService,
     get_error_analysis_service,
 )
@@ -65,4 +65,3 @@ async def get_error_analysis_status(
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     return ErrorAnalysisStatusResponse(**job)
-

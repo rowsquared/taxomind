@@ -9,12 +9,12 @@ from fastapi import FastAPI
 
 from taxomind import __version__
 
-from . import (
-    error_analysis_router,
-    inference_router,
-    labeling_router,
-    learning_router,
-    taxonomy_router,
+from .routers import (
+    error_analysis as error_analysis_router,
+    inference as inference_router,
+    labeling as labeling_router,
+    learning as learning_router,
+    taxonomy as taxonomy_router,
 )
 
 

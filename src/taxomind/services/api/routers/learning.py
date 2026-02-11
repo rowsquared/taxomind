@@ -8,14 +8,14 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from taxomind.services.api.auth import verify_token
-from taxomind.services.api.learning_models import (
+from taxomind.services.api.models.learning import (
     LearningJobResponse,
     LearningRequest,
     LearningStatusResponse,
     ProgressInfo,
     TrainingResult,
 )
-from taxomind.services.api.learning_service import (
+from taxomind.services.api.services.learning import (
     LearningPipelineService,
     get_learning_service,
 )

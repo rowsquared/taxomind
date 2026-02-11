@@ -8,13 +8,13 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from taxomind.services.api.auth import verify_token
-from taxomind.services.api.labeling_models import (
+from taxomind.services.api.models.labeling import (
     LabelingJobResponse,
     LabelingRequest,
     LabelingResponse,
     LabelingStatusResponse,
 )
-from taxomind.services.api.labeling_service import (
+from taxomind.services.api.services.labeling import (
     LabelingPipelineService,
     get_labeling_service,
 )

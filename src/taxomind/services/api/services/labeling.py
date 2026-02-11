@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, Dict
 
 from taxomind.services.api.base_service import BasePipelineService
-from taxomind.services.api.labeling_models import (
+from taxomind.services.api.models.labeling import (
     Annotation,
     LabelingResponse,
     SentenceError,

@@ -38,4 +38,3 @@ class ErrorAnalysisStatusResponse(BaseModel):
     result: Optional[Dict[str, Any]] = Field(
         None, description="Error analysis results (only when completed)"
     )
-

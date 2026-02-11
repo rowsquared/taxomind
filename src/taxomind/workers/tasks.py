@@ -25,7 +25,7 @@ def run_taxonomy_create(
     taxonomy_key: str,
     taxonomy_data: dict | None = None,
 ) -> None:
-    from taxomind.services.api.taxonomy_service import get_taxonomy_create_service
+    from taxomind.services.api.services.taxonomy import get_taxonomy_create_service
 
     get_taxonomy_create_service().run_pipeline(
         job_id=job_id, taxonomy_key=taxonomy_key, taxonomy_data=taxonomy_data
@@ -38,7 +38,7 @@ def run_taxonomy_build(
     taxonomy_key: str,
     taxonomy_data: dict | None = None,
 ) -> None:
-    from taxomind.services.api.taxonomy_service import get_taxonomy_build_service
+    from taxomind.services.api.services.taxonomy import get_taxonomy_build_service
 
     get_taxonomy_build_service().run_pipeline(
         job_id=job_id, taxonomy_key=taxonomy_key, taxonomy_data=taxonomy_data
@@ -51,7 +51,7 @@ def run_taxonomy_enrich(
     taxonomy_key: str,
     taxonomy_data: dict | None = None,
 ) -> None:
-    from taxomind.services.api.taxonomy_service import get_taxonomy_enrich_service
+    from taxomind.services.api.services.taxonomy import get_taxonomy_enrich_service
 
     get_taxonomy_enrich_service().run_pipeline(
         job_id=job_id, taxonomy_key=taxonomy_key, taxonomy_data=taxonomy_data
@@ -69,7 +69,7 @@ def run_inference(
     taxonomy_key: str,
     inference_data: dict,
 ) -> None:
-    from taxomind.services.api.inference_service import get_inference_service
+    from taxomind.services.api.services.inference import get_inference_service
 
     get_inference_service().run_pipeline(
         job_id=job_id, taxonomy_key=taxonomy_key, inference_data=inference_data
@@ -87,7 +87,7 @@ def run_labeling(
     batch_id: str,
     labeling_data: dict,
 ) -> None:
-    from taxomind.services.api.labeling_service import get_labeling_service
+    from taxomind.services.api.services.labeling import get_labeling_service
 
     get_labeling_service().run_pipeline(
         job_id=job_id, batch_id=batch_id, labeling_data=labeling_data
@@ -105,7 +105,7 @@ def run_learning(
     taxonomy_key: str,
     training_data: dict,
 ) -> None:
-    from taxomind.services.api.learning_service import get_learning_service
+    from taxomind.services.api.services.learning import get_learning_service
 
     get_learning_service().run_pipeline(
         job_id=job_id, taxonomy_key=taxonomy_key, training_data=training_data
@@ -119,6 +119,6 @@ def run_learning(
 
 @dramatiq.actor(max_retries=0, queue_name="default")
 def run_error_analysis(job_id: str) -> None:
-    from taxomind.services.api.error_analysis_service import get_error_analysis_service
+    from taxomind.services.api.services.error_analysis import get_error_analysis_service
 
     get_error_analysis_service().run_pipeline(job_id=job_id)

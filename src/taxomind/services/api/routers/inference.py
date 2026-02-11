@@ -8,13 +8,13 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from taxomind.services.api.auth import verify_token
-from taxomind.services.api.inference_models import (
+from taxomind.services.api.models.inference import (
     InferenceJobResponse,
     InferenceRequest,
     InferenceResult,
     InferenceStatusResponse,
 )
-from taxomind.services.api.inference_service import get_inference_service
+from taxomind.services.api.services.inference import get_inference_service
 from taxomind.storage.job_store import JobStore, get_job_store
 
 router = APIRouter(prefix="", tags=["inference"])

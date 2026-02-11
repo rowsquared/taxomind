@@ -10,7 +10,7 @@ from typing import Any, Dict
 import pandas as pd
 
 from taxomind.services.api.base_service import BasePipelineService
-from taxomind.services.api.inference_models import InferenceResult, PredictionResult
+from taxomind.services.api.models.inference import InferenceResult, PredictionResult
 from taxomind.services.api.sessions import ManagedSession, get_inference_session
 from taxomind.utils.text_utils import build_text_variable
 

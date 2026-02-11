@@ -84,20 +84,6 @@ class ProgressInfo(BaseModel):
     message: str = Field(..., description="Progress message")
 
 
-class TrainingMetricsSummary(BaseModel):
-    """Training metrics for a single hierarchical level.
-
-    Attributes:
-        accuracy: Validation accuracy score (0.0 to 1.0)
-        f1_score: Weighted F1 score (0.0 to 1.0)
-        training_mode: Training mode used (e.g., "standard", "negative_pairs_only")
-    """
-
-    accuracy: float = Field(..., ge=0.0, le=1.0, description="Accuracy score")
-    f1_score: float = Field(..., ge=0.0, le=1.0, description="F1 score")
-    training_mode: str = Field(..., description="Training mode")
-
-
 class TrainingResult(BaseModel):
     """Training result data for completed jobs.
 
