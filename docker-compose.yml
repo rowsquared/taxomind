@@ -14,6 +14,7 @@ services:
     build: .
     restart: unless-stopped
     environment:
+      - SERVICE_URL_API_3000
       - TASK_BACKEND=dramatiq
       - REDIS_URL=redis://redis:6379/0
       - PORT=3000

@@ -55,6 +55,17 @@ app = FastAPI(
 )
 
 
+@app.get("/", tags=["health"], include_in_schema=False)
+async def root():
+    """Root endpoint for platform probes that default to ``/``."""
+    return {
+        "status": "ok",
+        "service": "taxomind-api",
+        "health": "/health",
+        "docs": "/docs",
+    }
+
+
 @app.get("/health", tags=["health"])
 async def health_check():
     """Health check endpoint for monitoring and container orchestration."""
