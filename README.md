@@ -12,9 +12,9 @@ evidence centroids, and includes error-analysis utilities.
 
 - Multi-view embeddings for labels, definitions, and examples.
 - Retrieval + induced subgraph + top-down routing with explicit stopping.
-- Incremental learning via evidence centroids with no ancestor drift.
+- Incremental learning via evidence centroids.
 - FastAPI async job API for taxonomy build, inference, learning, and analysis.
-- Dramatiq + Redis task queue for production workloads.
+- Task queue for production workloads.
 - Cross-lingual routing and validation (embedding-based).
 
 ## Requirements
@@ -66,13 +66,20 @@ Copy `.env.example` to `.env` and adjust:
 
 ## Pipelines
 
+Prerequisite for taxonomy-scoped workflows:
+- Run `build_taxonomy` first for the target `taxonomy_key` (or trigger `POST /taxonomies` in the API) and wait for successful completion.
+- Only then run the other pipelines/endpoints that depend on `taxonomy_index` for that key (for example inference/labeling/learning/enrichment flows).
+
+
 | Pipeline | Description |
 | --- | --- |
-| `enrich_taxonomy` | Optional: enrich taxonomy definitions/examples (LLM-assisted) and save an enriched taxonomy definition. |
 | `build_taxonomy` | Build a per-taxonomy index with multi-view embeddings (label/definition/examples) for fast retrieval + routing. Also used by API `/taxonomies` after request JSON is normalized to CSV. |
+| `enrich_taxonomy` | Optional: enrich taxonomy definitions/examples (LLM-assisted) and save an enriched taxonomy definition. |
 | `inference` / `inference_batch` | Hierarchical inference: retrieval -> induced subgraph -> top-down routing with explicit stopping + scoped validation. |
 | `learning_pipe` | Incremental learning: update per-node evidence centroids from `/learn` corrections (no ancestor drift). |
 | `error_analysis` | Produce standardized targets from datasets for downstream error analysis/debugging. |
+
+
 
 Each pipeline is modular so that intermediate datasets (taxonomy enrichment,
 embeddings, inference results, etc.) can be cached or swapped for external

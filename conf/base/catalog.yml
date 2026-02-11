@@ -70,12 +70,18 @@ isic_taxonomy_definition:
 
 training_data_raw:
   type: pandas.CSVDataset
-  filepath: data/01_raw/training_data.csv
+  filepath: data/01_raw/export-2025-12-07T23_16_47.270Z.csv
   load_args:
     encoding: utf-8
     dtype:
-      isco_level4: str
-      isic_level4: str
+      ISCO_1: str
+      ISCO_2: str
+      ISCO_3: str
+      ISCO_4: str
+      ISIC_1: str
+      ISIC_2: str
+      ISIC_3: str
+      ISIC_4: str
 
 taxonomy_definition:
   type: partitions.PartitionedDataset
