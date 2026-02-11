@@ -46,64 +46,6 @@ def load_taxonomy_from_partition(
     return df
 
 
-def load_taxonomy_from_request(
-    taxonomy_request_files: Dict[str, Callable], taxonomy_key: str
-) -> pd.DataFrame:
-    """
-    Load and parse taxonomy from JSON request files.
-
-    This node processes JSON request files that contain taxonomy
-    definitions in a structured format with nodes, levels, and metadata.
-
-    Args:
-        taxonomy_request_files: Dictionary returned by
-            catalog.load('taxonomy_request_files')
-            Format: {partition_id: callable_that_returns_json}
-        taxonomy_key: The partition key to retrieve
-            (e.g., "ISIC", "ISCO")
-
-    Returns:
-        DataFrame with taxonomy data parsed from JSON request
-        with added taxonomyKey column
-    """
-    # Load the JSON request file
-    taxonomy_dict = taxonomy_utils.get_partition_by_key(
-        taxonomy_request_files, taxonomy_key
-    )
-
-    # Parse JSON structure 
-    if not taxonomy_dict:
-        raise ValueError("taxonomy payload is required")
-
-    taxonomy_data = taxonomy_dict.get("taxonomy") or {}
-    key_from_json = taxonomy_utils.normalize_text(taxonomy_data.get("key"))
-    if not key_from_json:
-        raise ValueError("taxonomy.key is required in JSON")
-
-    nodes_raw = taxonomy_data.get("nodes") or []
-    if not isinstance(nodes_raw, list) or not nodes_raw:
-        raise ValueError("taxonomy.nodes must be a non-empty list")
-
-    max_depth = taxonomy_utils.infer_max_depth(
-        taxonomy_data.get("maxDepth"), nodes_raw
-    )
-    if max_depth <= 0:
-        raise ValueError("taxonomy.maxDepth must be a positive integer")
-
-    records = []
-    for node in nodes_raw:
-        record = taxonomy_utils.normalize_node(node, key_from_json, max_depth)
-        records.append(record)
-
-    df = pd.DataFrame.from_records(records)
-    df = df.sort_values(["level", "code"]).reset_index(drop=True)
-
-    # Add taxonomy key for downstream processing
-    df["taxonomyKey"] = taxonomy_key
-
-    return df
-
-
 def normalize_prototype_views(taxonomy_raw: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize text fields for consistent processing.

@@ -167,13 +167,6 @@ def get_build_taxonomy_session() -> ManagedSession:
     )
 
 
-def get_build_taxonomy_from_request_session() -> ManagedSession:
-    return _get_or_create(
-        "build_taxonomy_from_request",
-        lambda: ManagedSession("build_taxonomy_from_request"),
-    )
-
-
 def get_enrich_taxonomy_session() -> ManagedSession:
     return _get_or_create(
         "enrich_taxonomy", lambda: ManagedSession("enrich_taxonomy")

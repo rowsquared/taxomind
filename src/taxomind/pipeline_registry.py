@@ -25,9 +25,6 @@ def register_pipelines() -> dict[str, Pipeline]:
     """
 
     build_taxonomy_pipe = build_taxonomy_pipeline.create_pipeline()
-    build_taxonomy_from_request_pipe = (
-        build_taxonomy_pipeline.create_pipeline_from_request()
-    )
     inference_pipe = inference_pipeline.create_pipeline()
     inference_batch_pipe = inference_pipeline.create_batch_pipeline()
     error_analysis_pipe = error_analysis_pipeline.create_pipeline()
@@ -36,7 +33,6 @@ def register_pipelines() -> dict[str, Pipeline]:
 
     pipelines = {
         "build_taxonomy": build_taxonomy_pipe,
-        "build_taxonomy_from_request": build_taxonomy_from_request_pipe,
         "inference": inference_pipe,
         "inference_batch": inference_batch_pipe,
         "error_analysis": error_analysis_pipe,

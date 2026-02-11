@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any, Dict
 
+import pandas as pd
+
 from taxomind.services.api.base_service import BasePipelineService
 from taxomind.services.api.sessions import (
     ManagedSession,
-    get_build_taxonomy_from_request_session,
     get_build_taxonomy_session,
     get_enrich_taxonomy_session,
 )
+from taxomind.utils import taxonomy_utils
 
 logger = logging.getLogger(__name__)
 
@@ -31,22 +32,21 @@ class TaxonomyPipelineService(BasePipelineService):
         self.pipeline_name = pipeline_name
 
     def _send_dramatiq(self, **kwargs) -> None:
-        from taxomind.workers.tasks import (
-            run_taxonomy_build,
-            run_taxonomy_create,
-            run_taxonomy_enrich,
-        )
+        if self.pipeline_name == "enrich_taxonomy":
+            from taxomind.workers.tasks import run_taxonomy_enrich
 
-        actor_map = {
-            "build_taxonomy_from_request": run_taxonomy_create,
-            "build_taxonomy": run_taxonomy_build,
-            "enrich_taxonomy": run_taxonomy_enrich,
-        }
-        actor_map[self.pipeline_name].send(
-            job_id=kwargs["job_id"],
-            taxonomy_key=kwargs["taxonomy_key"],
-            taxonomy_data=kwargs.get("taxonomy_data"),
-        )
+            run_taxonomy_enrich.send(
+                job_id=kwargs["job_id"],
+                taxonomy_key=kwargs["taxonomy_key"],
+            )
+        else:
+            from taxomind.workers.tasks import run_taxonomy_build
+
+            run_taxonomy_build.send(
+                job_id=kwargs["job_id"],
+                taxonomy_key=kwargs["taxonomy_key"],
+                taxonomy_data=kwargs.get("taxonomy_data"),
+            )
 
     def run_pipeline(
         self,
@@ -63,10 +63,8 @@ class TaxonomyPipelineService(BasePipelineService):
                 message=f"Starting pipeline '{self.pipeline_name}'",
             )
 
-            if self.pipeline_name == "build_taxonomy_from_request":
-                if not taxonomy_data:
-                    raise ValueError("taxonomy_data is required for create-from-request")
-                self._write_taxonomy_request_file(
+            if taxonomy_data:
+                self._write_taxonomy_csv(
                     taxonomy_key=taxonomy_key,
                     payload=taxonomy_data,
                 )
@@ -106,27 +104,44 @@ class TaxonomyPipelineService(BasePipelineService):
                 completed_at=datetime.now(UTC),
             )
 
-    def _write_taxonomy_request_file(
+    def _write_taxonomy_csv(
         self,
         taxonomy_key: str,
         payload: Dict[str, Any],
     ) -> None:
-        """Persist a taxonomy request JSON to the PartitionedDataset location.
+        """Convert a JSON taxonomy request to CSV in the taxonomy_definition partition.
 
-        The build_taxonomy_from_request pipeline reads from ``taxonomy_request_files``,
-        which is backed by ``data/03_primary/taxonomies/requests/<taxonomy_key>.json``.
+        Parses the nested JSON structure, validates and normalizes each node,
+        then writes a CSV file that ``load_taxonomy_from_partition`` can read.
         """
-        requests_dir = self.project_path / "data" / "03_primary" / "taxonomies" / "requests"
-        requests_dir.mkdir(parents=True, exist_ok=True)
-        filepath = requests_dir / f"{taxonomy_key}.json"
+        taxonomy_data = payload.get("taxonomy") or payload
+        key_from_json = taxonomy_utils.normalize_text(taxonomy_data.get("key"))
+        if not key_from_json:
+            raise ValueError("taxonomy.key is required in JSON")
 
-        if "taxonomy" in payload:
-            obj = payload
-        else:
-            obj = {"taxonomy": payload}
+        nodes_raw = taxonomy_data.get("nodes") or []
+        if not isinstance(nodes_raw, list) or not nodes_raw:
+            raise ValueError("taxonomy.nodes must be a non-empty list")
 
-        filepath.write_text(json.dumps(obj, ensure_ascii=False, indent=2))
-        logger.info("Wrote taxonomy request file: %s", filepath)
+        max_depth = taxonomy_utils.infer_max_depth(
+            taxonomy_data.get("maxDepth"), nodes_raw
+        )
+        if max_depth <= 0:
+            raise ValueError("taxonomy.maxDepth must be a positive integer")
+
+        records = []
+        for node in nodes_raw:
+            record = taxonomy_utils.normalize_node(node, key_from_json, max_depth)
+            records.append(record)
+
+        df = pd.DataFrame.from_records(records)
+        df = df.sort_values(["level", "code"]).reset_index(drop=True)
+
+        taxonomy_dir = self.project_path / "data" / "03_primary" / "taxonomies"
+        taxonomy_dir.mkdir(parents=True, exist_ok=True)
+        filepath = taxonomy_dir / f"{taxonomy_key}.csv"
+        df.to_csv(filepath, index=False, encoding="utf-8")
+        logger.info("Wrote taxonomy CSV: %s (%d nodes)", filepath, len(df))
 
 
 # ---------------------------------------------------------------------------
@@ -149,16 +164,12 @@ def _get_taxonomy_service(
     return service
 
 
-def get_taxonomy_create_service() -> TaxonomyPipelineService:
-    """Pipeline service for ``build_taxonomy_from_request``."""
-    return _get_taxonomy_service(
-        "build_taxonomy_from_request",
-        get_build_taxonomy_from_request_session,
-    )
-
-
 def get_taxonomy_build_service() -> TaxonomyPipelineService:
-    """Pipeline service for ``build_taxonomy``."""
+    """Pipeline service for ``build_taxonomy``.
+
+    Also used for API create requests -- the service converts JSON to CSV
+    before running the same pipeline.
+    """
     return _get_taxonomy_service(
         "build_taxonomy",
         get_build_taxonomy_session,

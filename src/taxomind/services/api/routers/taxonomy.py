@@ -16,7 +16,6 @@ from taxomind.services.api.models.taxonomy import (
 from taxomind.services.api.services.taxonomy import (
     TaxonomyPipelineService,
     get_taxonomy_build_service,
-    get_taxonomy_create_service,
     get_taxonomy_enrich_service,
 )
 from taxomind.storage.job_store import JobStore, get_job_store
@@ -33,7 +32,7 @@ router = APIRouter(prefix="", tags=["taxonomies"])
 async def create_taxonomy(
     request: TaxonomyRequest,
     background_tasks: BackgroundTasks,
-    service: TaxonomyPipelineService = Depends(get_taxonomy_create_service),
+    service: TaxonomyPipelineService = Depends(get_taxonomy_build_service),
     job_store: JobStore = Depends(get_job_store),
 ) -> TaxonomyJobResponse:
     """

@@ -15,21 +15,8 @@ import dramatiq
 import taxomind.workers.broker  # noqa: F401 — side-effect: sets broker
 
 # ---------------------------------------------------------------------------
-# Taxonomy actors (one per pipeline variant)
+# Taxonomy actors
 # ---------------------------------------------------------------------------
-
-
-@dramatiq.actor(max_retries=0, queue_name="default")
-def run_taxonomy_create(
-    job_id: str,
-    taxonomy_key: str,
-    taxonomy_data: dict | None = None,
-) -> None:
-    from taxomind.services.api.services.taxonomy import get_taxonomy_create_service
-
-    get_taxonomy_create_service().run_pipeline(
-        job_id=job_id, taxonomy_key=taxonomy_key, taxonomy_data=taxonomy_data
-    )
 
 
 @dramatiq.actor(max_retries=0, queue_name="default")
@@ -49,12 +36,11 @@ def run_taxonomy_build(
 def run_taxonomy_enrich(
     job_id: str,
     taxonomy_key: str,
-    taxonomy_data: dict | None = None,
 ) -> None:
     from taxomind.services.api.services.taxonomy import get_taxonomy_enrich_service
 
     get_taxonomy_enrich_service().run_pipeline(
-        job_id=job_id, taxonomy_key=taxonomy_key, taxonomy_data=taxonomy_data
+        job_id=job_id, taxonomy_key=taxonomy_key,
     )
 
 
