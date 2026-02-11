@@ -2,47 +2,51 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
-from multiprocessing import get_context
-from pathlib import Path
 from typing import Any, Dict
 
-from kedro import __version__ as kedro_version
-from kedro.framework.session import KedroSession
-from kedro.framework.startup import bootstrap_project
-from kedro.runner import SequentialRunner
-
-from taxomind.services.api.kedro_utils import release_catalog_datasets
-from taxomind.storage.job_store import get_job_store
+from taxomind.services.api.base_service import BasePipelineService
+from taxomind.services.api.sessions import (
+    ManagedSession,
+    get_build_taxonomy_from_request_session,
+    get_build_taxonomy_session,
+    get_enrich_taxonomy_session,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _run_taxonomy_pipeline_worker(
-    pipeline_name: str,
-    job_id: str,
-    taxonomy_key: str,
-    taxonomy_data: Dict[str, Any] | None,
-) -> None:
-    service = TaxonomyPipelineService(pipeline_name=pipeline_name)
-    service._run_pipeline_in_process(job_id, taxonomy_key, taxonomy_data)
-
-
-class TaxonomyPipelineService:
+class TaxonomyPipelineService(BasePipelineService):
     """Service for executing taxonomy pipelines with job tracking."""
 
-    _bootstrapped = False
-
-    def __init__(self, pipeline_name: str = "build_taxonomy_from_request") -> None:
+    def __init__(
+        self,
+        session: ManagedSession,
+        pipeline_name: str,
+    ) -> None:
+        super().__init__()
+        self._session = session
         self.pipeline_name = pipeline_name
-        self.project_path = Path(__file__).resolve().parents[4]
-        self.job_store = get_job_store()
 
-        # Bootstrap Kedro project once
-        if not TaxonomyPipelineService._bootstrapped:
-            bootstrap_project(self.project_path)
-            TaxonomyPipelineService._bootstrapped = True
+    def _send_dramatiq(self, **kwargs) -> None:
+        from taxomind.workers.tasks import (
+            run_taxonomy_build,
+            run_taxonomy_create,
+            run_taxonomy_enrich,
+        )
+
+        actor_map = {
+            "build_taxonomy_from_request": run_taxonomy_create,
+            "build_taxonomy": run_taxonomy_build,
+            "enrich_taxonomy": run_taxonomy_enrich,
+        }
+        actor_map[self.pipeline_name].send(
+            job_id=kwargs["job_id"],
+            taxonomy_key=kwargs["taxonomy_key"],
+            taxonomy_data=kwargs.get("taxonomy_data"),
+        )
 
     def run_pipeline(
         self,
@@ -50,38 +54,8 @@ class TaxonomyPipelineService:
         taxonomy_key: str,
         taxonomy_data: Dict[str, Any] | None = None,
     ) -> None:
-        """Execute a taxonomy pipeline in a short-lived worker process."""
-        context = get_context("spawn")
-        process = context.Process(
-            target=_run_taxonomy_pipeline_worker,
-            args=(self.pipeline_name, job_id, taxonomy_key, taxonomy_data),
-            daemon=True,
-        )
+        """Execute a taxonomy pipeline (called from BackgroundTasks)."""
         try:
-            process.start()
-        except Exception as exc:
-            error_msg = f"Failed to start taxonomy worker: {exc}"
-            logger.error("Job %s: %s", job_id, error_msg)
-            self.job_store.update_job(
-                job_id,
-                status="failed",
-                error=error_msg,
-                message="Failed to start pipeline worker",
-                completed_at=datetime.now(UTC),
-            )
-
-    def _run_pipeline_in_process(
-        self,
-        job_id: str,
-        taxonomy_key: str,
-        taxonomy_data: Dict[str, Any] | None = None,
-    ) -> None:
-        """
-        Execute a taxonomy pipeline in the worker process.
-        Updates job status throughout execution.
-        """
-        try:
-            # Update status to running
             self.job_store.update_job(
                 job_id,
                 status="running",
@@ -104,80 +78,26 @@ class TaxonomyPipelineService:
                 taxonomy_key,
             )
 
-            # Run Kedro pipeline
-            with KedroSession.create(
-                project_path=self.project_path,
-                runtime_params={"taxonomy_key": taxonomy_key},
-            ) as session:
-                context = session.load_context()
+            self.job_store.update_job(
+                job_id,
+                progress=0.3,
+                message="Running pipeline nodes",
+            )
 
-                # Get pipeline from registry (Kedro 1.0)
-                from taxomind.pipeline_registry import register_pipelines
-                pipelines = register_pipelines()
-                pipeline = pipelines[self.pipeline_name]
-                catalog = context.catalog
+            self._session.run(parameters={"taxonomy_key": taxonomy_key})
 
-                try:
-                    self.job_store.update_job(job_id, progress=0.2, message="Starting Kedro run")
-
-                    # Prepare hooks and run params
-                    hook_manager = session._hook_manager
-                    run_params = self._build_run_params(session, context)
-
-                    hook_manager.hook.before_pipeline_run(
-                        run_params=run_params, pipeline=pipeline, catalog=catalog
-                    )
-
-                    # Execute pipeline
-                    self.job_store.update_job(
-                        job_id,
-                        progress=0.3,
-                        message="Running pipeline nodes",
-                    )
-
-                    runner = SequentialRunner()
-                    try:
-                        run_result = runner.run(
-                            pipeline=pipeline,
-                            catalog=catalog,
-                            hook_manager=hook_manager,
-                            run_id=session.store["session_id"],
-                        )
-                    except Exception as error:
-                        hook_manager.hook.on_pipeline_error(
-                            error=error,
-                            run_params=run_params,
-                            pipeline=pipeline,
-                            catalog=catalog,
-                        )
-                        raise
-
-                    hook_manager.hook.after_pipeline_run(
-                        run_params=run_params,
-                        run_result=run_result,
-                        pipeline=pipeline,
-                        catalog=catalog,
-                    )
-
-                    # Pipeline completed successfully
-                    logger.info(f"Job {job_id}: Pipeline completed successfully")
-                    self.job_store.update_job(
-                        job_id,
-                        status="completed",
-                        progress=1.0,
-                        message="Pipeline completed successfully",
-                        completed_at=datetime.now(UTC),
-                    )
-                finally:
-                    release_catalog_datasets(catalog)
-                    run_result = None
+            logger.info("Job %s: Pipeline completed successfully", job_id)
+            self.job_store.update_job(
+                job_id,
+                status="completed",
+                progress=1.0,
+                message="Pipeline completed successfully",
+                completed_at=datetime.now(UTC),
+            )
 
         except Exception as e:
-            # Pipeline failed
             error_msg = str(e)
-            logger.error(
-                f"Job {job_id}: Pipeline failed with error: {error_msg}"
-            )
+            logger.error("Job %s: Pipeline failed with error: %s", job_id, error_msg)
             self.job_store.update_job(
                 job_id,
                 status="failed",
@@ -191,76 +111,63 @@ class TaxonomyPipelineService:
         taxonomy_key: str,
         payload: Dict[str, Any],
     ) -> None:
-        """
-        Persist a taxonomy request JSON to the PartitionedDataset location.
+        """Persist a taxonomy request JSON to the PartitionedDataset location.
 
-        The build_taxonomy_from_request pipeline reads from `taxonomy_request_files`,
-        which is backed by `data/03_primary/taxonomies/requests/<taxonomy_key>.json`.
+        The build_taxonomy_from_request pipeline reads from ``taxonomy_request_files``,
+        which is backed by ``data/03_primary/taxonomies/requests/<taxonomy_key>.json``.
         """
         requests_dir = self.project_path / "data" / "03_primary" / "taxonomies" / "requests"
         requests_dir.mkdir(parents=True, exist_ok=True)
         filepath = requests_dir / f"{taxonomy_key}.json"
 
-        # The build_taxonomy_from_request loader expects the JSON object to contain a `taxonomy` key.
         if "taxonomy" in payload:
             obj = payload
         else:
             obj = {"taxonomy": payload}
 
-        import json
-
         filepath.write_text(json.dumps(obj, ensure_ascii=False, indent=2))
         logger.info("Wrote taxonomy request file: %s", filepath)
 
-    def _build_run_params(
-        self, session: KedroSession, context: Any
-    ) -> Dict[str, Any]:
-        """Build run parameters for Kedro hooks."""
-        session_id = session.store["session_id"]
-        runtime_params = session.store.get("runtime_params") or {}
-        return {
-            "session_id": session_id,
-            "project_path": self.project_path.as_posix(),
-            "env": context.env,
-            "kedro_version": kedro_version,
-            "tags": None,
-            "from_nodes": None,
-            "to_nodes": None,
-            "node_names": None,
-            "from_inputs": None,
-            "to_outputs": None,
-            "load_versions": None,
-            "runtime_params": runtime_params,
-            "pipeline_name": self.pipeline_name,
-            "namespaces": None,
-            "runner": "SequentialRunner",
-            "only_missing_outputs": False,
-        }
 
-
-
+# ---------------------------------------------------------------------------
 # Singleton instances per pipeline name
+# ---------------------------------------------------------------------------
 _service_instances: dict[str, TaxonomyPipelineService] = {}
 
 
-def _get_taxonomy_service(pipeline_name: str) -> TaxonomyPipelineService:
+def _get_taxonomy_service(
+    pipeline_name: str,
+    session_factory,
+) -> TaxonomyPipelineService:
     service = _service_instances.get(pipeline_name)
     if service is None:
-        service = TaxonomyPipelineService(pipeline_name=pipeline_name)
+        service = TaxonomyPipelineService(
+            session=session_factory(),
+            pipeline_name=pipeline_name,
+        )
         _service_instances[pipeline_name] = service
     return service
 
 
 def get_taxonomy_create_service() -> TaxonomyPipelineService:
-    """Pipeline service for `build_taxonomy_from_request`."""
-    return _get_taxonomy_service("build_taxonomy_from_request")
+    """Pipeline service for ``build_taxonomy_from_request``."""
+    return _get_taxonomy_service(
+        "build_taxonomy_from_request",
+        get_build_taxonomy_from_request_session,
+    )
 
 
 def get_taxonomy_build_service() -> TaxonomyPipelineService:
-    """Pipeline service for `build_taxonomy`."""
-    return _get_taxonomy_service("build_taxonomy")
+    """Pipeline service for ``build_taxonomy``."""
+    return _get_taxonomy_service(
+        "build_taxonomy",
+        get_build_taxonomy_session,
+    )
 
 
 def get_taxonomy_enrich_service() -> TaxonomyPipelineService:
-    """Pipeline service for `enrich_taxonomy`."""
-    return _get_taxonomy_service("enrich_taxonomy")
+    """Pipeline service for ``enrich_taxonomy``."""
+    return _get_taxonomy_service(
+        "enrich_taxonomy",
+        get_enrich_taxonomy_session,
+    )

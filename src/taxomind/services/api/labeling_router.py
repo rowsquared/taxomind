@@ -78,9 +78,9 @@ async def create_labeling_job(
         ],
     }
 
-    # Add pipeline execution to background tasks
-    background_tasks.add_task(
-        service.run_pipeline,
+    # Dispatch pipeline execution
+    service.submit(
+        background_tasks,
         job_id=job_id,
         batch_id=request.batchId,
         labeling_data=labeling_data,

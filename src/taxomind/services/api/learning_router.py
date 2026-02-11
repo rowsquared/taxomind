@@ -113,9 +113,9 @@ async def create_learning_job(
         ],
     }
 
-    # Add pipeline execution to background tasks
-    background_tasks.add_task(
-        service.run_pipeline,
+    # Dispatch pipeline execution
+    service.submit(
+        background_tasks,
         job_id=job_id,
         taxonomy_key=request.taxonomyKey,
         training_data=training_data,

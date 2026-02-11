@@ -170,10 +170,20 @@ _instance_lock = threading.Lock()
 
 
 def get_job_store() -> JobStore:
-    """Get or create the singleton JobStore instance."""
+    """Get or create the singleton job store.
+
+    Returns a ``RedisJobStore`` when ``REDIS_URL`` is set, otherwise a
+    local file-backed ``JobStore``.
+    """
     global _job_store_instance
     if _job_store_instance is None:
         with _instance_lock:
             if _job_store_instance is None:
-                _job_store_instance = JobStore()
+                redis_url = os.getenv("REDIS_URL")
+                if redis_url:
+                    from taxomind.storage.redis_job_store import RedisJobStore
+
+                    _job_store_instance = RedisJobStore(redis_url=redis_url)
+                else:
+                    _job_store_instance = JobStore()
     return _job_store_instance

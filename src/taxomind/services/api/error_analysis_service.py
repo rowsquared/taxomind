@@ -4,64 +4,30 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from multiprocessing import get_context
-from pathlib import Path
 from typing import Any, Dict
 
 import pandas as pd
-from kedro import __version__ as kedro_version
-from kedro.framework.session import KedroSession
-from kedro.framework.startup import bootstrap_project
-from kedro.runner import SequentialRunner
 
-from taxomind.services.api.kedro_utils import release_catalog_datasets
-from taxomind.storage.job_store import get_job_store
+from taxomind.services.api.base_service import BasePipelineService
+from taxomind.services.api.sessions import ManagedSession, get_error_analysis_session
 
 logger = logging.getLogger(__name__)
 
 
-def _run_error_analysis_worker(pipeline_name: str, job_id: str) -> None:
-    service = ErrorAnalysisPipelineService(pipeline_name=pipeline_name)
-    service._run_pipeline_in_process(job_id)
-
-
-class ErrorAnalysisPipelineService:
+class ErrorAnalysisPipelineService(BasePipelineService):
     """Service for executing the error_analysis pipeline with job tracking."""
 
-    _bootstrapped = False
+    def __init__(self, session: ManagedSession | None = None) -> None:
+        super().__init__()
+        self._session = session or get_error_analysis_session()
 
-    def __init__(self, pipeline_name: str = "error_analysis") -> None:
-        self.pipeline_name = pipeline_name
-        self.project_path = Path(__file__).resolve().parents[4]
-        self.job_store = get_job_store()
+    def _send_dramatiq(self, **kwargs) -> None:
+        from taxomind.workers.tasks import run_error_analysis
 
-        if not ErrorAnalysisPipelineService._bootstrapped:
-            bootstrap_project(self.project_path)
-            ErrorAnalysisPipelineService._bootstrapped = True
+        run_error_analysis.send(job_id=kwargs["job_id"])
 
     def run_pipeline(self, job_id: str) -> None:
-        """Execute the error analysis pipeline in a short-lived worker process."""
-        context = get_context("spawn")
-        process = context.Process(
-            target=_run_error_analysis_worker,
-            args=(self.pipeline_name, job_id),
-            daemon=True,
-        )
-        try:
-            process.start()
-        except Exception as exc:
-            error_msg = f"Failed to start error analysis worker: {exc}"
-            logger.error("Job %s: %s", job_id, error_msg)
-            self.job_store.update_job(
-                job_id,
-                status="failed",
-                error=error_msg,
-                message="Failed to start pipeline worker",
-                completed_at=datetime.now(UTC),
-            )
-
-    def _run_pipeline_in_process(self, job_id: str) -> None:
-        """Execute the error analysis pipeline in the worker process."""
+        """Execute the error analysis pipeline (called from BackgroundTasks)."""
         try:
             self.job_store.update_job(
                 job_id,
@@ -70,67 +36,25 @@ class ErrorAnalysisPipelineService:
                 message="Starting error analysis pipeline",
             )
 
-            with KedroSession.create(project_path=self.project_path) as session:
-                context = session.load_context()
+            self.job_store.update_job(
+                job_id,
+                progress=0.3,
+                message="Running error analysis nodes",
+            )
 
-                from taxomind.pipeline_registry import register_pipelines
+            result = self._session.run()
 
-                pipelines = register_pipelines()
-                pipeline = pipelines[self.pipeline_name]
-                catalog = context.catalog
+            self.job_store.update_job(
+                job_id,
+                progress=0.9,
+                message="Summarizing outputs",
+            )
 
-                try:
-                    hook_manager = session._hook_manager
-                    run_params = self._build_run_params(session, context)
+            classifai = result.get("error_analysis_classifai_targets")
+            training = result.get("error_analysis_taxonomy_training_targets")
+            sentences = result.get("error_analysis_training_sentences_targets")
 
-                    hook_manager.hook.before_pipeline_run(
-                        run_params=run_params, pipeline=pipeline, catalog=catalog
-                    )
-
-                    self.job_store.update_job(
-                        job_id,
-                        progress=0.3,
-                        message="Running error analysis nodes",
-                    )
-
-                    runner = SequentialRunner()
-                    try:
-                        run_result = runner.run(
-                            pipeline=pipeline,
-                            catalog=catalog,
-                            hook_manager=hook_manager,
-                            run_id=session.store["session_id"],
-                        )
-                    except Exception as error:
-                        hook_manager.hook.on_pipeline_error(
-                            error=error,
-                            run_params=run_params,
-                            pipeline=pipeline,
-                            catalog=catalog,
-                        )
-                        raise
-
-                    hook_manager.hook.after_pipeline_run(
-                        run_params=run_params,
-                        run_result=run_result,
-                        pipeline=pipeline,
-                        catalog=catalog,
-                    )
-
-                    self.job_store.update_job(
-                        job_id,
-                        progress=0.9,
-                        message="Summarizing outputs",
-                    )
-
-                    classifai = catalog.load("error_analysis_classifai_targets")
-                    training = catalog.load("error_analysis_taxonomy_training_targets")
-                    sentences = catalog.load("error_analysis_training_sentences_targets")
-
-                    result = self._summarize(classifai, training, sentences)
-                finally:
-                    release_catalog_datasets(catalog)
-                    run_result = None
+            summary = self._summarize(classifai, training, sentences)
 
             self.job_store.update_job(
                 job_id,
@@ -138,7 +62,7 @@ class ErrorAnalysisPipelineService:
                 progress=1.0,
                 message="Error analysis completed successfully",
                 completed_at=datetime.now(UTC),
-                result=result,
+                result=summary,
             )
 
         except Exception as exc:
@@ -177,30 +101,6 @@ class ErrorAnalysisPipelineService:
                 "taxonomy_training": _by_taxonomy(training),
                 "training_sentences": _by_taxonomy(sentences),
             },
-        }
-
-    def _build_run_params(
-        self, session: KedroSession, context: Any
-    ) -> Dict[str, Any]:
-        session_id = session.store["session_id"]
-        runtime_params = session.store.get("runtime_params") or {}
-        return {
-            "session_id": session_id,
-            "project_path": self.project_path.as_posix(),
-            "env": context.env,
-            "kedro_version": kedro_version,
-            "tags": None,
-            "from_nodes": None,
-            "to_nodes": None,
-            "node_names": None,
-            "from_inputs": None,
-            "to_outputs": None,
-            "load_versions": None,
-            "runtime_params": runtime_params,
-            "pipeline_name": self.pipeline_name,
-            "namespaces": None,
-            "runner": "SequentialRunner",
-            "only_missing_outputs": False,
         }
 
 

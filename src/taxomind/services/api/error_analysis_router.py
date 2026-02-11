@@ -41,7 +41,7 @@ async def run_error_analysis(
         created_at=datetime.now(UTC),
     )
 
-    background_tasks.add_task(service.run_pipeline, job_id=job_id)
+    service.submit(background_tasks, job_id=job_id)
 
     return ErrorAnalysisJobResponse(
         job_id=job_id,

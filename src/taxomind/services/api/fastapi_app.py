@@ -11,6 +11,7 @@ from taxomind import __version__
 
 from . import (
     error_analysis_router,
+    inference_router,
     labeling_router,
     learning_router,
     taxonomy_router,
@@ -57,14 +58,28 @@ app = FastAPI(
 @app.get("/health", tags=["health"])
 async def health_check():
     """Health check endpoint for monitoring and container orchestration."""
-    return {
+    task_backend = os.getenv("TASK_BACKEND", "background")
+    result = {
         "status": "healthy",
         "service": "taxomind-api",
         "version": __version__,
+        "task_backend": task_backend,
     }
+
+    if task_backend == "dramatiq":
+        from taxomind.storage.job_store import get_job_store
+
+        store = get_job_store()
+        redis_ok = hasattr(store, "ping") and store.ping()
+        result["redis"] = "connected" if redis_ok else "disconnected"
+        if not redis_ok:
+            result["status"] = "degraded"
+
+    return result
 
 
 app.include_router(taxonomy_router.router)
+app.include_router(inference_router.router)
 app.include_router(labeling_router.router)
 app.include_router(learning_router.router)
 app.include_router(error_analysis_router.router)

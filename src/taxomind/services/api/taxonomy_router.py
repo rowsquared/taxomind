@@ -67,9 +67,9 @@ async def create_taxonomy(
         created_at=datetime.now(UTC),
     )
 
-    # Add pipeline execution to background tasks
-    background_tasks.add_task(
-        service.run_pipeline,
+    # Dispatch pipeline execution
+    service.submit(
+        background_tasks,
         job_id=job_id,
         taxonomy_key=taxonomy_key,
         taxonomy_data=request.model_dump(),
@@ -104,8 +104,8 @@ async def enrich_taxonomy(
         message="Taxonomy enrichment queued",
         created_at=datetime.now(UTC),
     )
-    background_tasks.add_task(
-        service.run_pipeline,
+    service.submit(
+        background_tasks,
         job_id=job_id,
         taxonomy_key=taxonomy_key,
         taxonomy_data=None,
@@ -139,8 +139,8 @@ async def build_taxonomy_index(
         message="Taxonomy index build queued",
         created_at=datetime.now(UTC),
     )
-    background_tasks.add_task(
-        service.run_pipeline,
+    service.submit(
+        background_tasks,
         job_id=job_id,
         taxonomy_key=taxonomy_key,
         taxonomy_data=None,

@@ -5,89 +5,39 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from multiprocessing import get_context
-from pathlib import Path
 from typing import Any, Dict
 
-from kedro.framework.session import KedroSession
-from kedro.framework.startup import bootstrap_project
-from kedro.runner import SequentialRunner
+import pandas as pd
 
+from taxomind.services.api.base_service import BasePipelineService
 from taxomind.services.api.inference_models import InferenceResult, PredictionResult
-from taxomind.services.api.kedro_utils import release_catalog_datasets
-from taxomind.storage.job_store import get_job_store
+from taxomind.services.api.sessions import ManagedSession, get_inference_session
 from taxomind.utils.text_utils import build_text_variable
 
 logger = logging.getLogger(__name__)
 
 
-def _run_inference_pipeline_worker(
-    pipeline_name: str,
-    job_id: str,
-    taxonomy_key: str,
-    inference_data: Dict[str, Any],
-) -> None:
-    service = InferencePipelineService(pipeline_name=pipeline_name)
-    service._run_pipeline_in_process(job_id, taxonomy_key, inference_data)
-
-
-class InferencePipelineService:
+class InferencePipelineService(BasePipelineService):
     """Service for executing inference pipeline with job tracking."""
 
-    _bootstrapped = False
+    def __init__(self, session: ManagedSession | None = None) -> None:
+        super().__init__()
+        self._session = session or get_inference_session()
 
-    def __init__(self, pipeline_name: str = "inference_batch") -> None:
-        """Initialize the inference pipeline service.
+    def _send_dramatiq(self, **kwargs) -> None:
+        from taxomind.workers.tasks import run_inference
 
-        Args:
-            pipeline_name: Name of the Kedro pipeline to execute
-        """
-        self.pipeline_name = pipeline_name
-        self.project_path = Path(__file__).resolve().parents[4]
-        self.job_store = get_job_store()
-
-        # Bootstrap Kedro project once
-        if not InferencePipelineService._bootstrapped:
-            bootstrap_project(self.project_path)
-            InferencePipelineService._bootstrapped = True
+        run_inference.send(
+            job_id=kwargs["job_id"],
+            taxonomy_key=kwargs["taxonomy_key"],
+            inference_data=kwargs["inference_data"],
+        )
 
     def run_pipeline(
         self, job_id: str, taxonomy_key: str, inference_data: Dict[str, Any]
     ) -> None:
-        """Execute the inference pipeline in a short-lived worker process."""
-        context = get_context("spawn")
-        process = context.Process(
-            target=_run_inference_pipeline_worker,
-            args=(self.pipeline_name, job_id, taxonomy_key, inference_data),
-            daemon=True,
-        )
+        """Execute the inference pipeline (called from BackgroundTasks)."""
         try:
-            process.start()
-        except Exception as exc:
-            error_msg = f"Failed to start inference worker: {exc}"
-            logger.error("Job %s: %s", job_id, error_msg)
-            self.job_store.update_job(
-                job_id,
-                status="failed",
-                error=error_msg,
-                message="Failed to start pipeline worker",
-                failed_at=datetime.now(UTC),
-            )
-
-    def _run_pipeline_in_process(
-        self, job_id: str, taxonomy_key: str, inference_data: Dict[str, Any]
-    ) -> None:
-        """
-        Execute the inference pipeline in the worker process.
-        Updates job status throughout execution.
-
-        Args:
-            job_id: Unique identifier for this inference job
-            taxonomy_key: Taxonomy identifier (e.g., "ISCO")
-            inference_data: Inference payload with sentences to classify
-        """
-        try:
-            # Update status to running
             self.job_store.update_job(
                 job_id,
                 status="running",
@@ -148,98 +98,49 @@ class InferencePipelineService:
                 len(query_texts),
             )
 
-            # Run Kedro pipeline
-            with KedroSession.create(
-                project_path=self.project_path,
-                runtime_params={
+            self.job_store.update_job(
+                job_id,
+                message="Performing classification",
+            )
+
+            result = self._session.run(
+                parameters={
                     "taxonomy_key": taxonomy_key,
                     "inference_query_input": query_texts,
                 },
-            ) as session:
-                context = session.load_context()
+            )
 
-                # Get pipeline from registry
-                from taxomind.pipeline_registry import register_pipelines
+            self.job_store.update_job(
+                job_id,
+                message="Finalizing inference results",
+            )
 
-                pipelines = register_pipelines()
-                pipeline = pipelines[self.pipeline_name]
-                catalog = context.catalog
+            predictions_df = result.get("inference_predictions_df") if isinstance(result, dict) else result
+            taxonomy_df = self._load_taxonomy_df(taxonomy_key)
 
-                try:
-                    # Prepare hooks and run params
-                    hook_manager = session._hook_manager
-                    run_params = self._build_run_params(session, context)
+            inference_result = self._format_results(
+                taxonomy_key=taxonomy_key,
+                predictions_df=predictions_df,
+                taxonomy_df=taxonomy_df,
+                query_id_to_sentence_id=query_id_to_sentence_id,
+                sentence_texts=sentence_texts,
+                ordered_sentence_ids=ordered_sentence_ids,
+            )
 
-                    hook_manager.hook.before_pipeline_run(
-                        run_params=run_params, pipeline=pipeline, catalog=catalog
-                    )
-
-                    # Execute pipeline
-                    self.job_store.update_job(
-                        job_id,
-                        message="Performing classification",
-                    )
-
-                    runner = SequentialRunner()
-                    try:
-                        run_result = runner.run(
-                            pipeline=pipeline,
-                            catalog=catalog,
-                            hook_manager=hook_manager,
-                            run_id=session.store["session_id"],
-                        )
-                    except Exception as error:
-                        hook_manager.hook.on_pipeline_error(
-                            error=error,
-                            run_params=run_params,
-                            pipeline=pipeline,
-                            catalog=catalog,
-                        )
-                        raise
-
-                    hook_manager.hook.after_pipeline_run(
-                        run_params=run_params,
-                        run_result=run_result,
-                        pipeline=pipeline,
-                        catalog=catalog,
-                    )
-
-                    # Get results from catalog
-                    self.job_store.update_job(
-                        job_id,
-                        message="Finalizing inference results",
-                    )
-
-                    predictions_df = catalog.load("inference_predictions_df")
-                    taxonomy_df = catalog.load("inference_taxonomy_df")
-                    inference_result = self._format_results(
-                        taxonomy_key=taxonomy_key,
-                        predictions_df=predictions_df,
-                        taxonomy_df=taxonomy_df,
-                        query_id_to_sentence_id=query_id_to_sentence_id,
-                        sentence_texts=sentence_texts,
-                        ordered_sentence_ids=ordered_sentence_ids,
-                    )
-
-                    # Pipeline completed successfully
-                    logger.info(
-                        "Job %s: Inference completed for %d sentences",
-                        job_id,
-                        len(ordered_sentence_ids),
-                    )
-                    self.job_store.update_job(
-                        job_id,
-                        status="completed",
-                        message="Inference completed successfully",
-                        completed_at=datetime.now(UTC),
-                        result=inference_result.model_dump(),
-                    )
-                finally:
-                    release_catalog_datasets(catalog)
-                    run_result = None
+            logger.info(
+                "Job %s: Inference completed for %d sentences",
+                job_id,
+                len(ordered_sentence_ids),
+            )
+            self.job_store.update_job(
+                job_id,
+                status="completed",
+                message="Inference completed successfully",
+                completed_at=datetime.now(UTC),
+                result=inference_result.model_dump(),
+            )
 
         except Exception as e:
-            # Pipeline failed
             error_msg = str(e)
             logger.error(
                 "Job %s: Inference pipeline failed with error: %s",
@@ -253,6 +154,23 @@ class InferencePipelineService:
                 message="Inference pipeline execution failed",
                 failed_at=datetime.now(UTC),
             )
+
+    def _load_taxonomy_df(self, taxonomy_key: str) -> pd.DataFrame:
+        """Load the taxonomy index directly from disk.
+
+        ``inference_taxonomy_df`` is an intermediate pipeline dataset (not a
+        terminal output), so kedro-boot does not return it.  We read the
+        Parquet file that the taxonomy build pipeline writes to instead.
+        """
+        path = (
+            self.project_path
+            / "data"
+            / "03_primary"
+            / "taxonomies"
+            / "index"
+            / f"{taxonomy_key}.parquet"
+        )
+        return pd.read_parquet(path)
 
     def _format_results(
         self,
@@ -342,52 +260,12 @@ class InferencePipelineService:
 
         return InferenceResult(taxonomyKey=taxonomy_key, results=results)
 
-    def _build_run_params(
-        self, session: KedroSession, context: Any
-    ) -> Dict[str, Any]:
-        """Build run parameters for Kedro hooks.
 
-        Args:
-            session: Active Kedro session
-            context: Kedro context
-
-        Returns:
-            Dictionary of run parameters for hooks
-        """
-        from kedro import __version__ as kedro_version
-
-        session_id = session.store["session_id"]
-        runtime_params = session.store.get("runtime_params") or {}
-        return {
-            "session_id": session_id,
-            "project_path": self.project_path.as_posix(),
-            "env": context.env,
-            "kedro_version": kedro_version,
-            "tags": None,
-            "from_nodes": None,
-            "to_nodes": None,
-            "node_names": None,
-            "from_inputs": None,
-            "to_outputs": None,
-            "load_versions": None,
-            "runtime_params": runtime_params,
-            "pipeline_name": self.pipeline_name,
-            "namespaces": None,
-            "runner": "SequentialRunner",
-            "only_missing_outputs": False,
-        }
-
-
-# Singleton instance
 _service_instance: InferencePipelineService | None = None
 
 
 def get_inference_service() -> InferencePipelineService:
-    """Get or create singleton InferencePipelineService instance.
-
-    Returns:
-        Singleton instance of InferencePipelineService
-    """
+    """Get or create singleton InferencePipelineService instance."""
     global _service_instance
     if _service_instance is None:
         _service_instance = InferencePipelineService()

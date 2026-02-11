@@ -25,5 +25,12 @@ pyarrow==22.0.0
 # Configuration
 pyyaml==6.0.3
 
+# kedro-boot session management
+kedro-boot==0.3.0
+
+# Task queue (Dramatiq + Redis)
+dramatiq[redis]==2.0.1
+redis==6.4.0
+
 # Optional: Uncomment if using ollama in production
 # ollama==0.6.1

@@ -86,12 +86,12 @@ async def create_inference_job(
     # Convert request to dict for pipeline
     inference_data = request.model_dump()
 
-    # Schedule pipeline execution in background
-    background_tasks.add_task(
-        service.run_pipeline,
-        job_id,
-        taxonomy_key,
-        inference_data,
+    # Dispatch pipeline execution
+    service.submit(
+        background_tasks,
+        job_id=job_id,
+        taxonomy_key=taxonomy_key,
+        inference_data=inference_data,
     )
 
     return InferenceJobResponse(
