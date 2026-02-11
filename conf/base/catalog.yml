@@ -191,6 +191,7 @@ taxonomy_with_paths:
 
 enrich_embedding_model:
   type: MemoryDataset
+  copy_mode: assign
 
 taxonomy_with_similar:
   type: MemoryDataset
@@ -207,6 +208,7 @@ taxonomy_normalized:
 
 embedding_model:
   type: MemoryDataset
+  copy_mode: assign
 
 taxonomy_with_label_embeddings:
   type: MemoryDataset
@@ -492,6 +494,7 @@ ensemble_results:
 # Setup phase outputs (loaded once per session)
 inference_embedding_model:
   type: MemoryDataset
+  copy_mode: assign
 
 inference_taxonomy_df:
   type: MemoryDataset

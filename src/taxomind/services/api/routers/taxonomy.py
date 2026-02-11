@@ -5,13 +5,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from taxomind.services.api.auth import verify_token
 from taxomind.services.api.models.taxonomy import (
     TaxonomyJobResponse,
     TaxonomyRequest,
     TaxonomyStatusResponse,
+)
+from taxomind.services.api.request_source import (
+    resolve_source_slug,
+    scoped_taxonomy_key,
 )
 from taxomind.services.api.services.taxonomy import (
     TaxonomyPipelineService,
@@ -31,6 +35,7 @@ router = APIRouter(prefix="", tags=["taxonomies"])
 )
 async def create_taxonomy(
     request: TaxonomyRequest,
+    http_request: Request,
     background_tasks: BackgroundTasks,
     service: TaxonomyPipelineService = Depends(get_taxonomy_build_service),
     job_store: JobStore = Depends(get_job_store),
@@ -56,22 +61,29 @@ async def create_taxonomy(
     # Generate unique job ID
     job_id = str(uuid4())
     taxonomy_key = request.taxonomy.key
+    source_slug = resolve_source_slug(http_request, request.sourceSlug)
+    scoped_key = scoped_taxonomy_key(source_slug, taxonomy_key)
 
     # Create job entry
     job_store.create_job(
         job_id=job_id,
         status="pending",
-        taxonomy_key=taxonomy_key,
+        taxonomy_key=scoped_key,
+        source_slug=source_slug,
         message="Taxonomy processing queued",
         created_at=datetime.now(UTC),
     )
+
+    taxonomy_data = request.model_dump()
+    taxonomy_data["sourceSlug"] = source_slug
+    taxonomy_data["taxonomy"]["key"] = scoped_key
 
     # Dispatch pipeline execution
     service.submit(
         background_tasks,
         job_id=job_id,
-        taxonomy_key=taxonomy_key,
-        taxonomy_data=request.model_dump(),
+        taxonomy_key=scoped_key,
+        taxonomy_data=taxonomy_data,
     )
 
     return TaxonomyJobResponse(
@@ -90,23 +102,27 @@ async def create_taxonomy(
 )
 async def enrich_taxonomy(
     taxonomy_key: str,
+    http_request: Request,
     background_tasks: BackgroundTasks,
     service: TaxonomyPipelineService = Depends(get_taxonomy_enrich_service),
     job_store: JobStore = Depends(get_job_store),
 ) -> TaxonomyJobResponse:
     """Run the `enrich_taxonomy` pipeline asynchronously for one taxonomy."""
     job_id = str(uuid4())
+    source_slug = resolve_source_slug(http_request, None)
+    scoped_key = scoped_taxonomy_key(source_slug, taxonomy_key)
     job_store.create_job(
         job_id=job_id,
         status="pending",
-        taxonomy_key=taxonomy_key,
+        taxonomy_key=scoped_key,
+        source_slug=source_slug,
         message="Taxonomy enrichment queued",
         created_at=datetime.now(UTC),
     )
     service.submit(
         background_tasks,
         job_id=job_id,
-        taxonomy_key=taxonomy_key,
+        taxonomy_key=scoped_key,
         taxonomy_data=None,
     )
     return TaxonomyJobResponse(
@@ -125,23 +141,27 @@ async def enrich_taxonomy(
 )
 async def build_taxonomy_index(
     taxonomy_key: str,
+    http_request: Request,
     background_tasks: BackgroundTasks,
     service: TaxonomyPipelineService = Depends(get_taxonomy_build_service),
     job_store: JobStore = Depends(get_job_store),
 ) -> TaxonomyJobResponse:
     """Run the `build_taxonomy` pipeline asynchronously for one taxonomy."""
     job_id = str(uuid4())
+    source_slug = resolve_source_slug(http_request, None)
+    scoped_key = scoped_taxonomy_key(source_slug, taxonomy_key)
     job_store.create_job(
         job_id=job_id,
         status="pending",
-        taxonomy_key=taxonomy_key,
+        taxonomy_key=scoped_key,
+        source_slug=source_slug,
         message="Taxonomy index build queued",
         created_at=datetime.now(UTC),
     )
     service.submit(
         background_tasks,
         job_id=job_id,
-        taxonomy_key=taxonomy_key,
+        taxonomy_key=scoped_key,
         taxonomy_data=None,
     )
     return TaxonomyJobResponse(

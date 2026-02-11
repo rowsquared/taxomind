@@ -11,7 +11,6 @@ taxonomy preparation:
 
 from typing import Callable, Dict, Optional
 import logging
-
 import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
@@ -46,7 +45,7 @@ def load_taxonomy_from_partition(
     return df
 
 
-def normalize_prototype_views(taxonomy_raw: pd.DataFrame) -> pd.DataFrame:
+def normalize_prototype_views(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize text fields for consistent processing.
 
@@ -63,7 +62,6 @@ def normalize_prototype_views(taxonomy_raw: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame with normalized text fields
     """
-    df = taxonomy_raw.copy()
 
     df["code"] = df["code"].apply(taxonomy_utils.normalize_code)
     df["parentCode"] = df["parentCode"].apply(taxonomy_utils.normalize_parent)
@@ -86,7 +84,7 @@ def normalize_prototype_views(taxonomy_raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_text_embeddings(
-    taxonomy_df: pd.DataFrame,
+    df: pd.DataFrame,
     embedding_model: SentenceTransformer,
     embedding_spec: dict,
     batch_size: int = 16,
@@ -96,7 +94,7 @@ def build_text_embeddings(
     Build embeddings for a single taxonomy view defined by embedding_spec.
 
     Args:
-        taxonomy_df: DataFrame with normalized taxonomy data
+        df: DataFrame with normalized taxonomy data
         embedding_model: Pre-loaded SentenceTransformer model
         embedding_spec: Dict with:
             - text_col: source column name
@@ -105,13 +103,14 @@ def build_text_embeddings(
             - embed_all: optional bool, embed all rows (including empty)
             - warn_on_empty: optional bool, warn on empty text
             - log_counts: optional bool, log with/without text counts
+            - max_chars: Optional max characters to embed (truncate if set)
         batch_size: Batch size for embedding calls
         input_prefix: Optional prefix to add before non-empty text (model-specific)
+        
 
     Returns:
         DataFrame with added embedding column (np.ndarray or None)
     """
-    df = taxonomy_df.copy()
 
     text_col = embedding_spec["text_col"]
     output_col = embedding_spec["output_col"]
@@ -119,6 +118,7 @@ def build_text_embeddings(
     embed_all = embedding_spec.get("embed_all", False)
     warn_on_empty = embedding_spec.get("warn_on_empty", False)
     log_counts = embedding_spec.get("log_counts", False)
+    max_chars = embedding_spec.get("max_chars", 500)
 
     if text_col not in df.columns:
         logger.warning(
@@ -151,6 +151,7 @@ def build_text_embeddings(
             input_prefix=input_prefix,
             batch_size=batch_size,
             show_progress_bar=True,
+            max_chars=max_chars,
         )
 
         logger.info(f"{view_name.capitalize()} embeddings created: shape={embeddings.shape}")
@@ -168,6 +169,7 @@ def build_text_embeddings(
         input_prefix=input_prefix,
         batch_size=batch_size,
         show_progress_bar=True,
+        max_chars=max_chars,
     )
 
     if embeddings.size == 0:
@@ -191,7 +193,7 @@ def build_text_embeddings(
 
 
 def add_embedding_metadata(
-    taxonomy_with_embeddings: pd.DataFrame,
+    df: pd.DataFrame,
     model_name: str,
 ) -> pd.DataFrame:
     """
@@ -203,7 +205,7 @@ def add_embedding_metadata(
     structure and empirical observations.
 
     Args:
-        taxonomy_with_embeddings: DataFrame with all three embedding columns
+        df: DataFrame with all three embedding columns
         model_name: Name of the embedding model used
 
     Returns:
@@ -217,7 +219,6 @@ def add_embedding_metadata(
         - last_evidence_count: 0 (previous evidence snapshot count)
         - last_evidence_last_updated: None (previous evidence timestamp)
     """
-    df = taxonomy_with_embeddings.copy()
 
     # Infer embedding dimension from first label embedding
     embedding_dim = df["embedding_label"].iloc[0].shape[0]
@@ -249,7 +250,7 @@ def add_embedding_metadata(
 
 
 def save_taxonomy_index(
-    taxonomy_embeddings: pd.DataFrame,
+    df: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
     """
     Prepare taxonomy index for saving as partitioned dataset.
@@ -258,7 +259,7 @@ def save_taxonomy_index(
     All metadata (embeddings, relationships, evidence state) are in the DataFrame.
 
     Args:
-        taxonomy_embeddings: DataFrame with all embeddings and metadata columns:
+        df: DataFrame with all embeddings and metadata columns:
             - code, level, parentCode, label, definition, examples, taxonomyKey, isLeaf
             - embedding_label, embedding_definition, embedding_examples
             - embedding_model_name, embedding_dim
@@ -271,7 +272,6 @@ def save_taxonomy_index(
     Raises:
         ValueError: If required columns are missing
     """
-    df = taxonomy_embeddings.copy()
 
     # Get taxonomy key
     if "taxonomyKey" not in df.columns:

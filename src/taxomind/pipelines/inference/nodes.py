@@ -490,6 +490,7 @@ def embed_queries(
     embedding_model: SentenceTransformer,
     batch_size: int = 32,
     query_prefix: Optional[str] = None,
+    max_chars: Optional[int] = 100,
 ) -> pd.DataFrame:
     """
     Embed multiple queries in batch for efficiency.
@@ -503,6 +504,7 @@ def embed_queries(
         embedding_model: Pre-loaded SentenceTransformer model
         batch_size: Batch size for encoding (default 32)
         query_prefix: Optional prefix added before non-empty query text
+        max_chars: Optional max characters to embed (truncate if set)
 
     Returns:
         DataFrame with added 'embedding' column (np.ndarray per row)
@@ -519,6 +521,7 @@ def embed_queries(
         input_prefix=query_prefix,
         batch_size=batch_size,
         show_progress_bar=len(texts) > 10,
+        max_chars=max_chars,
     )
 
     # Add embeddings to DataFrame (as list of arrays for proper storage)
@@ -542,6 +545,7 @@ def embed_query(
     query_text: str,
     embedding_model: SentenceTransformer,
     query_prefix: Optional[str] = None,
+    max_chars: Optional[int] = 100,
 ) -> np.ndarray:
     """
     Embed input query text for similarity comparison.
@@ -556,6 +560,7 @@ def embed_query(
         query_text: Input text to classify
         embedding_model: Pre-loaded SentenceTransformer model
         query_prefix: Optional prefix added before non-empty query text
+        max_chars: Optional max characters to embed (truncate if set)
 
     Returns:
         L2-normalized query embedding vector
@@ -571,6 +576,7 @@ def embed_query(
         input_prefix=query_prefix,
         batch_size=1,
         show_progress_bar=False,
+        max_chars=max_chars,
     )
     query_embedding = embeddings[0]
 

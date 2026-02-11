@@ -53,6 +53,9 @@ class LearningPipelineService(BasePipelineService):
                 "taxonomyKey": taxonomy_key,
                 "createdAt": datetime.now(UTC).isoformat(),
             }
+            source_slug = str(training_data.get("sourceSlug") or "").strip()
+            if source_slug:
+                job_config["sourceSlug"] = source_slug
             self._persist_job_inputs(job_id, job_config, training_data)
 
             self.job_store.update_job(

@@ -81,7 +81,7 @@ def create_pipeline(**kwargs) -> Pipeline:
         inference.validation_threshold: Override threshold (default 0.05)
         inference.validation_stability_margin: Optional stability margin for overrides
         inference.max_depth: Optional maximum depth to descend (default None)
-        inference.embedding_batch_size: Batch size for embedding (default 32)
+        embedding.batch_size: Batch size for embedding (default 32)
 
     Returns:
         Kedro Pipeline object
@@ -155,7 +155,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                 inputs=[
                     "inference_queries_df",
                     "inference_embedding_model",
-                    "params:inference.embedding_batch_size",
+                    "params:embedding.batch_size",
                     "params:embedding_prefix.query",
                 ],
                 outputs="inference_queries_embedded_df",
@@ -267,7 +267,7 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
         inference.validation_threshold: Override threshold (default 0.05)
         inference.validation_stability_margin: Optional stability margin for overrides
         inference.max_depth: Optional maximum depth (default None)
-        inference.embedding_batch_size: Batch size for embedding (default 32)
+        embedding.batch_size: Batch size for embedding (default 32)
 
     Returns:
         Kedro Pipeline object
@@ -346,7 +346,7 @@ def create_batch_pipeline(**kwargs) -> Pipeline:
                 inputs=[
                     "inference_queries_df",
                     "inference_embedding_model",
-                    "params:inference.embedding_batch_size",
+                    "params:embedding.batch_size",
                     "params:embedding_prefix.query",
                 ],
                 outputs="inference_queries_embedded_df",

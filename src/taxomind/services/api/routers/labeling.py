@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from taxomind.services.api.auth import verify_token
 from taxomind.services.api.models.labeling import (
@@ -13,6 +13,10 @@ from taxomind.services.api.models.labeling import (
     LabelingRequest,
     LabelingResponse,
     LabelingStatusResponse,
+)
+from taxomind.services.api.request_source import (
+    resolve_source_slug,
+    scoped_taxonomy_key,
 )
 from taxomind.services.api.services.labeling import (
     LabelingPipelineService,
@@ -31,6 +35,7 @@ router = APIRouter(prefix="", tags=["labeling"])
 )
 async def create_labeling_job(
     request: LabelingRequest,
+    http_request: Request,
     background_tasks: BackgroundTasks,
     service: LabelingPipelineService = Depends(get_labeling_service),
     job_store: JobStore = Depends(get_job_store),
@@ -55,19 +60,23 @@ async def create_labeling_job(
     """
     # Generate unique job ID
     job_id = str(uuid4())
+    source_slug = resolve_source_slug(http_request, request.sourceSlug)
+    scoped_key = scoped_taxonomy_key(source_slug, request.taxonomyKey)
 
     # Create job entry
     job_store.create_job(
         job_id=job_id,
         batch_id=request.batchId,
         status="pending",
+        source_slug=source_slug,
         message="Labeling job queued",
         created_at=datetime.now(UTC),
     )
 
     # Prepare data for pipeline
     labeling_data = {
-        "taxonomyKey": request.taxonomyKey,
+        "taxonomyKey": scoped_key,
+        "sourceSlug": source_slug,
         "batchId": request.batchId,
         "sentences": [
             {

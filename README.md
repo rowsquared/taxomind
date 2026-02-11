@@ -19,7 +19,7 @@ evidence centroids, and includes error-analysis utilities.
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.9+
 - Optional: `OPENAI_API_KEY` for taxonomy enrichment.
 - Optional: Docker + Docker Compose for containerised deployment.
 
@@ -39,13 +39,14 @@ evidence centroids, and includes error-analysis utilities.
 
    ```bash
    kedro run --pipeline build_taxonomy
-   python scripts/start_api.py
+   PYTHONPATH=src python scripts/start_api.py
    ```
 
 ## Configuration and Data
 
-- Shared configuration lives in `conf/base/`; put secrets or overrides in
-  `conf/local/` (never commit secrets).
+- Shared defaults live in `conf/base/`.
+- Environment overrides can live in `conf/test/` and `conf/prod/` (run with `kedro run --env=...`).
+- Local secrets and machine-specific settings belong in `conf/local/` (never commit secrets).
 - Data inputs are expected under `data/` (see `data/01_raw/` for inputs).
 - For enrichment, set `OPENAI_API_KEY` in the environment or `.env`.
 
@@ -60,16 +61,15 @@ Copy `.env.example` to `.env` and adjust:
 | `TASK_BACKEND`      | `background`                 | `background` (in-process) or `dramatiq` (Redis queue)          |
 | `REDIS_URL`         | _(none)_                     | Redis connection string, required when `TASK_BACKEND=dramatiq` |
 | `JOB_TTL_SECONDS`   | `86400`                      | How long completed jobs stay in Redis (24h default)            |
-| `OPENAI_API_KEY`    | _(none)_                     | Required only for taxonomy enrichment                          |
-| `PORT`              | `3000` (prod) / `8000` (dev) | API server port                                                |
+| `OPENAI_API_KEY`    | _(none)_                     | Required only for taxonomy enrichment (Optional)               |
+| `PORT`              | `3000`                       | API server port in production entrypoint / containers          |
 
 ## Pipelines
 
 | Pipeline | Description |
 | --- | --- |
 | `enrich_taxonomy` | Optional: enrich taxonomy definitions/examples (LLM-assisted) and save an enriched taxonomy definition. |
-| `build_taxonomy` | Build a per-taxonomy index with multi-view embeddings (label/definition/examples) for fast retrieval + routing. |
-| `build_taxonomy_from_request` | Same as `build_taxonomy`, but reads taxonomy JSON requests (used by the API `/taxonomies`). |
+| `build_taxonomy` | Build a per-taxonomy index with multi-view embeddings (label/definition/examples) for fast retrieval + routing. Also used by API `/taxonomies` after request JSON is normalized to CSV. |
 | `inference` / `inference_batch` | Hierarchical inference: retrieval -> induced subgraph -> top-down routing with explicit stopping + scoped validation. |
 | `learning_pipe` | Incremental learning: update per-node evidence centroids from `/learn` corrections (no ancestor drift). |
 | `error_analysis` | Produce standardized targets from datasets for downstream error analysis/debugging. |
@@ -90,6 +90,10 @@ auth) that maps to the Kedro pipelines:
 - `POST /label` and `GET /label/{job_id}/status` (run `inference_batch` for labeling)
 - `POST /learn` and `GET /learn/{job_id}/status` (run `learning_pipe`)
 - `POST /error-analysis` and `GET /error-analysis/{job_id}/status` (run `error_analysis`)
+
+For POST request bodies on `/taxonomies`, `/classify`, `/label`, and `/learn`,
+an optional top-level `sourceSlug` is supported. If omitted, it is inferred from
+the incoming host (e.g. `domani1.com` -> `domani1`).
 
 Testing guide: `docs/API_TESTING.md`.
 

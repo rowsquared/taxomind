@@ -10,7 +10,6 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 
-
 def load_embedding_model(
     model_name: str,
     cache_dir: Optional[str] = None,
@@ -60,7 +59,7 @@ def encode_texts(
     input_prefix: Optional[str] = None,
     batch_size: int = 32,
     show_progress_bar: bool = True,
-    max_chars: int | None = 100,
+    max_chars: Optional[int] = 100,
 ) -> Tuple[np.ndarray, List[int]]:
     """
     Encode texts with a SentenceTransformer model.

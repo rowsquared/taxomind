@@ -333,6 +333,7 @@ def build_similar_labels(
     k_similar_labels: int,
     embedding_prefix: Dict[str, str],
     batch_size: int = 32,
+    max_chars: Optional[int] = 500,
 ) -> pd.DataFrame:
     """
     Find similar labels at each level using embeddings.
@@ -342,6 +343,7 @@ def build_similar_labels(
         embedding_model: Pre-loaded SentenceTransformer model
         k_similar_labels: Number of similar labels to find per node
         embedding_prefix: Dict with 'document' prefix for embeddings
+        max_chars: Optional max characters to embed (truncate if set)
 
     Returns:
         DataFrame with added similar_labels column
@@ -375,6 +377,7 @@ def build_similar_labels(
                 input_prefix=prefix,
                 batch_size=batch_size,
                 show_progress_bar=False,
+                max_chars=max_chars,
             )
         except Exception as exc:
             logger.warning(f"Embedding failed for level {level}: {exc}")

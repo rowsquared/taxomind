@@ -19,6 +19,14 @@ class TrainingAnnotation(BaseModel):
     level: int = Field(..., ge=1, description="Hierarchical level number")
     nodeCode: str = Field(..., min_length=1, description="Taxonomy node code")
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "level": 4,
+                "nodeCode": "2512",
+            }
+        }
+
 
 class TrainingSentence(BaseModel):
     """Training sentence with text fields and hierarchical annotations.
@@ -37,6 +45,23 @@ class TrainingSentence(BaseModel):
         ..., min_length=1, description="Hierarchical annotations"
     )
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "sentenceId": "job-001",
+                "fields": {
+                    "job_title": "Software Engineer",
+                    "job_description": "Develops web applications",
+                },
+                "annotations": [
+                    {"level": 1, "nodeCode": "2"},
+                    {"level": 2, "nodeCode": "25"},
+                    {"level": 3, "nodeCode": "251"},
+                    {"level": 4, "nodeCode": "2512"},
+                ],
+            }
+        }
+
 
 class LearningRequest(BaseModel):
     """Request payload for POST /learn endpoint.
@@ -47,9 +72,40 @@ class LearningRequest(BaseModel):
     """
 
     taxonomyKey: str = Field(..., min_length=1, description="Taxonomy identifier")
+    sourceSlug: Optional[str] = Field(
+        None,
+        min_length=1,
+        description=(
+            "Optional source identifier for the caller. "
+            "If omitted, inferred from request host (e.g., domani1.com -> domani1)."
+        ),
+    )
     sentences: List[TrainingSentence] = Field(
         ..., min_length=1, description="Training sentences with annotations"
     )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "taxonomyKey": "ISCO",
+                "sourceSlug": "domani1",
+                "sentences": [
+                    {
+                        "sentenceId": "job-001",
+                        "fields": {
+                            "job_title": "Software Engineer",
+                            "job_description": "Develops web applications",
+                        },
+                        "annotations": [
+                            {"level": 1, "nodeCode": "2"},
+                            {"level": 2, "nodeCode": "25"},
+                            {"level": 3, "nodeCode": "251"},
+                            {"level": 4, "nodeCode": "2512"},
+                        ],
+                    }
+                ],
+            }
+        }
 
 
 class LearningJobResponse(BaseModel):
@@ -69,6 +125,17 @@ class LearningJobResponse(BaseModel):
     message: str = Field(..., description="Status message")
     createdAt: datetime = Field(..., description="Job creation timestamp")
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "jobId": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "pending",
+                "taxonomyKey": "ISCO",
+                "message": "Learning job initiated for taxonomy ISCO",
+                "createdAt": "2026-02-11T12:00:00Z",
+            }
+        }
+
 
 class ProgressInfo(BaseModel):
     """Training progress information for running jobs.
@@ -82,6 +149,15 @@ class ProgressInfo(BaseModel):
     currentLevel: int = Field(..., description="Current level being trained")
     totalLevels: int = Field(..., description="Total levels to train")
     message: str = Field(..., description="Progress message")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "currentLevel": 2,
+                "totalLevels": 4,
+                "message": "Training models",
+            }
+        }
 
 
 class TrainingResult(BaseModel):
@@ -100,6 +176,22 @@ class TrainingResult(BaseModel):
     trainingDataStats: Dict[str, Any] = Field(
         ..., description="Training data statistics"
     )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "modelVersion": "evidence_only",
+                "trainingMetrics": {
+                    "totalLevels": 0,
+                    "levelsSummary": {},
+                },
+                "trainingDataStats": {
+                    "taxonomyKey": "ISCO",
+                    "receivedSamples": 15,
+                    "updatedNodes": 9,
+                },
+            }
+        }
 
 
 class LearningStatusResponse(BaseModel):
@@ -140,3 +232,28 @@ class LearningStatusResponse(BaseModel):
     result: Optional[TrainingResult] = Field(
         None, description="Training results if completed"
     )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "jobId": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "completed",
+                "taxonomyKey": "ISCO",
+                "message": "Training completed successfully",
+                "createdAt": "2026-02-11T12:00:00Z",
+                "startedAt": "2026-02-11T12:00:05Z",
+                "completedAt": "2026-02-11T12:01:22Z",
+                "result": {
+                    "modelVersion": "evidence_only",
+                    "trainingMetrics": {
+                        "totalLevels": 0,
+                        "levelsSummary": {},
+                    },
+                    "trainingDataStats": {
+                        "taxonomyKey": "ISCO",
+                        "receivedSamples": 15,
+                        "updatedNodes": 9,
+                    },
+                },
+            }
+        }

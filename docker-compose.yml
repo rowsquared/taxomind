@@ -17,6 +17,12 @@ services:
       - TASK_BACKEND=dramatiq
       - REDIS_URL=redis://redis:6379/0
       - PORT=3000
+      - TOKENIZERS_PARALLELISM=false
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
+      - MALLOC_ARENA_MAX=2
+      - JOB_STALE_RUNNING_SECONDS=900
     env_file:
       - .env
     ports:
@@ -40,6 +46,13 @@ services:
     environment:
       - TASK_BACKEND=dramatiq
       - REDIS_URL=redis://redis:6379/0
+      - TOKENIZERS_PARALLELISM=false
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
+      - MALLOC_ARENA_MAX=2
+      - API_REUSE_PIPELINE_SESSIONS=false
+      - JOB_STALE_RUNNING_SECONDS=900
     env_file:
       - .env
     volumes:

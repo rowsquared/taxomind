@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from taxomind.services.api.auth import verify_token
 from taxomind.services.api.models.inference import (
@@ -13,6 +13,10 @@ from taxomind.services.api.models.inference import (
     InferenceRequest,
     InferenceResult,
     InferenceStatusResponse,
+)
+from taxomind.services.api.request_source import (
+    resolve_source_slug,
+    scoped_taxonomy_key,
 )
 from taxomind.services.api.services.inference import get_inference_service
 from taxomind.storage.job_store import JobStore, get_job_store
@@ -28,6 +32,7 @@ router = APIRouter(prefix="", tags=["inference"])
 )
 async def create_inference_job(
     request: InferenceRequest,
+    http_request: Request,
     background_tasks: BackgroundTasks,
     service=Depends(get_inference_service),
     job_store: JobStore = Depends(get_job_store),
@@ -72,32 +77,37 @@ async def create_inference_job(
     """
     job_id = str(uuid4())
     taxonomy_key = request.taxonomyKey
+    source_slug = resolve_source_slug(http_request, request.sourceSlug)
+    scoped_key = scoped_taxonomy_key(source_slug, taxonomy_key)
     now = datetime.now(UTC)
 
     # Create job record
     job_store.create_job(
         job_id=job_id,
         status="pending",
-        taxonomy_key=taxonomy_key,
+        taxonomy_key=scoped_key,
+        source_slug=source_slug,
         message="Inference job created",
         created_at=now,
     )
 
     # Convert request to dict for pipeline
     inference_data = request.model_dump()
+    inference_data["sourceSlug"] = source_slug
+    inference_data["taxonomyKey"] = scoped_key
 
     # Dispatch pipeline execution
     service.submit(
         background_tasks,
         job_id=job_id,
-        taxonomy_key=taxonomy_key,
+        taxonomy_key=scoped_key,
         inference_data=inference_data,
     )
 
     return InferenceJobResponse(
         jobId=job_id,
         status="pending",
-        taxonomyKey=taxonomy_key,
+        taxonomyKey=scoped_key,
         message="Inference job created. Poll /classify/{jobId}/status for results.",
         createdAt=now,
     )

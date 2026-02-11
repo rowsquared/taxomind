@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from taxomind.services.api.auth import verify_token
 from taxomind.services.api.models.learning import (
@@ -14,6 +14,10 @@ from taxomind.services.api.models.learning import (
     LearningStatusResponse,
     ProgressInfo,
     TrainingResult,
+)
+from taxomind.services.api.request_source import (
+    resolve_source_slug,
+    scoped_taxonomy_key,
 )
 from taxomind.services.api.services.learning import (
     LearningPipelineService,
@@ -32,6 +36,7 @@ router = APIRouter(prefix="", tags=["learning"])
 )
 async def create_learning_job(
     request: LearningRequest,
+    http_request: Request,
     background_tasks: BackgroundTasks,
     service: LearningPipelineService = Depends(get_learning_service),
     job_store: JobStore = Depends(get_job_store),
@@ -84,19 +89,23 @@ async def create_learning_job(
     """
     # Generate unique job ID
     job_id = str(uuid4())
+    source_slug = resolve_source_slug(http_request, request.sourceSlug)
+    scoped_key = scoped_taxonomy_key(source_slug, request.taxonomyKey)
 
     # Create job entry
     job_store.create_job(
         job_id=job_id,
         status="pending",
-        message=f"Learning job queued for taxonomy {request.taxonomyKey}",
+        message=f"Learning job queued for taxonomy {scoped_key}",
         created_at=datetime.now(UTC),
-        taxonomy_key=request.taxonomyKey,
+        taxonomy_key=scoped_key,
+        source_slug=source_slug,
     )
 
     # Prepare data for pipeline
     training_data = {
-        "taxonomyKey": request.taxonomyKey,
+        "taxonomyKey": scoped_key,
+        "sourceSlug": source_slug,
         "sentences": [
             {
                 "sentenceId": sentence.sentenceId,
@@ -117,15 +126,15 @@ async def create_learning_job(
     service.submit(
         background_tasks,
         job_id=job_id,
-        taxonomy_key=request.taxonomyKey,
+        taxonomy_key=scoped_key,
         training_data=training_data,
     )
 
     return LearningJobResponse(
         jobId=job_id,
         status="pending",
-        taxonomyKey=request.taxonomyKey,
-        message=f"Learning job initiated for taxonomy {request.taxonomyKey}",
+        taxonomyKey=scoped_key,
+        message=f"Learning job initiated for taxonomy {scoped_key}",
         createdAt=datetime.now(UTC),
     )
 

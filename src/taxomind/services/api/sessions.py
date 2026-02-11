@@ -19,7 +19,9 @@ Design decisions
 
 from __future__ import annotations
 
+import gc
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -60,9 +62,15 @@ class ManagedSession:
         self,
         pipeline_name: str,
         extra_inputs: Optional[List[str]] = None,
+        reuse_session: Optional[bool] = None,
     ) -> None:
         self._pipeline_name = pipeline_name
         self._extra_inputs = extra_inputs or []
+        if reuse_session is None:
+            reuse_session = (
+                os.getenv("API_REUSE_PIPELINE_SESSIONS", "true").lower() == "true"
+            )
+        self._reuse_session = reuse_session
         self._session: KedroBootSession | None = None
         self._lock = threading.Lock()
         self._init_lock = threading.Lock()
@@ -123,12 +131,31 @@ class ManagedSession:
             Pipeline outputs — dict if multiple MemoryDataset outputs,
             single value if exactly one, empty dict if none.
         """
-        self._ensure_session()
+        if self._reuse_session:
+            self._ensure_session()
+            with self._lock:
+                return self._session.run(
+                    inputs=inputs,
+                    parameters=parameters,
+                )
+
+        # Run with a fresh session each time to release model memory after execution.
         with self._lock:
-            return self._session.run(
-                inputs=inputs,
-                parameters=parameters,
-            )
+            session = self._boot()
+            try:
+                return session.run(
+                    inputs=inputs,
+                    parameters=parameters,
+                )
+            finally:
+                close = getattr(session, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception as exc:  # pragma: no cover - defensive cleanup
+                        logger.warning("Failed to close session cleanly: %s", exc)
+                del session
+                gc.collect()
 
 
 # ---------------------------------------------------------------------------

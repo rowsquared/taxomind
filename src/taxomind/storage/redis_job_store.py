@@ -36,6 +36,9 @@ class RedisJobStore:
         url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
         self._redis: redis.Redis = redis.Redis.from_url(url, decode_responses=True)
         self._ttl = ttl or int(os.getenv("JOB_TTL_SECONDS", str(DEFAULT_TTL_SECONDS)))
+        self._stale_running_seconds = int(
+            os.getenv("JOB_STALE_RUNNING_SECONDS", "1800")
+        )
 
     # -- helpers --------------------------------------------------------------
 
@@ -74,10 +77,12 @@ class RedisJobStore:
 
     def create_job(self, job_id: str, **kwargs: Any) -> Dict[str, Any]:
         """Create a new job entry with initial status."""
+        now = datetime.now(UTC)
         job_data: Dict[str, Any] = {
             "job_id": job_id,
             "status": "pending",
-            "created_at": datetime.now(UTC),
+            "created_at": now,
+            "updated_at": now,
             "message": None,
             "progress": None,
             "error": None,
@@ -96,17 +101,50 @@ class RedisJobStore:
         if raw is None:
             return None
         job = json.loads(raw)
+        kwargs.setdefault("updated_at", datetime.now(UTC))
         for k, v in kwargs.items():
             job[k] = self._serialize_value(v)
         self._redis.set(key, json.dumps(job), ex=self._ttl)
         return self._deserialize_job(json.dumps(job))
+
+    def _mark_stale_running_job(self, job_id: str, job: Dict[str, Any]) -> Dict[str, Any]:
+        if self._stale_running_seconds <= 0:
+            return job
+        if job.get("status") != "running":
+            return job
+        reference = (
+            job.get("updated_at")
+            or job.get("started_at")
+            or job.get("created_at")
+        )
+        if not isinstance(reference, datetime):
+            return job
+        now = datetime.now(UTC)
+        age_seconds = (now - reference).total_seconds()
+        if age_seconds < self._stale_running_seconds:
+            return job
+        message = (
+            "Job marked as failed after stale running state "
+            f"({int(age_seconds)}s without updates)"
+        )
+        logger.warning("Marking stale job %s as failed: %s", job_id, message)
+        updated = self.update_job(
+            job_id,
+            status="failed",
+            message=message,
+            error="Stale running job detected (worker likely crashed or was killed)",
+            failed_at=now,
+            completed_at=now,
+        )
+        return updated or job
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve job data by ID."""
         raw = self._redis.get(self._key(job_id))
         if raw is None:
             return None
-        return self._deserialize_job(raw)
+        job = self._deserialize_job(raw)
+        return self._mark_stale_running_job(job_id, job)
 
     def list_jobs(self) -> List[Dict[str, Any]]:
         """List all jobs."""
@@ -115,7 +153,11 @@ class RedisJobStore:
         for key in keys:
             raw = self._redis.get(key)
             if raw:
-                jobs.append(self._deserialize_job(raw))
+                job = self._deserialize_job(raw)
+                job_id = str(job.get("job_id") or "").strip()
+                if job_id:
+                    job = self._mark_stale_running_job(job_id, job)
+                jobs.append(job)
         return jobs
 
     def delete_job(self, job_id: str) -> bool:

@@ -1,0 +1,10 @@
+# Production catalog overrides.
+# Loaded on top of conf/base when running with --env=prod.
+
+# Persist inference outputs in production runs.
+inference_predictions_df:
+  type: pandas.CSVDataset
+  filepath: data/07_model_output/inference/inference_predictions.csv
+  save_args:
+    encoding: utf-8
+    index: false

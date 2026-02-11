@@ -1,0 +1,10 @@
+# Testing catalog overrides.
+# Loaded on top of conf/base when running with --env=test.
+
+# Keep inference output in memory for fast, side-effect-free tests.
+inference_predictions_df:
+  type: MemoryDataset
+
+# Avoid writing zero-shot outputs during tests.
+zero_shot_judgement:
+  type: MemoryDataset

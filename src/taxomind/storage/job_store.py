@@ -19,6 +19,9 @@ class JobStore:
     def __init__(self, storage_path: str | None = None) -> None:
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
+        self._stale_running_seconds = int(
+            os.getenv("JOB_STALE_RUNNING_SECONDS", "1800")
+        )
         self._storage_path = self._init_storage_path(storage_path)
         self._last_loaded_mtime_ns: int | None = None
         if self._storage_path is not None:
@@ -116,10 +119,12 @@ class JobStore:
         """Create a new job entry with initial status."""
         with self._lock:
             self._maybe_reload()
+            now = datetime.now(UTC)
             job_data = {
                 "job_id": job_id,
                 "status": "pending",
-                "created_at": datetime.now(UTC),
+                "created_at": now,
+                "updated_at": now,
                 "message": None,
                 "progress": None,
                 "error": None,
@@ -136,14 +141,50 @@ class JobStore:
             self._maybe_reload()
             if job_id not in self._jobs:
                 return None
+            kwargs.setdefault("updated_at", datetime.now(UTC))
             self._jobs[job_id].update(kwargs)
             self._persist()
             return self._jobs[job_id].copy()
+
+    def _mark_stale_running_job(self, job_id: str) -> None:
+        if self._stale_running_seconds <= 0:
+            return
+        job = self._jobs.get(job_id)
+        if not job or job.get("status") != "running":
+            return
+        reference = (
+            job.get("updated_at")
+            or job.get("started_at")
+            or job.get("created_at")
+        )
+        if not isinstance(reference, datetime):
+            return
+        now = datetime.now(UTC)
+        age_seconds = (now - reference).total_seconds()
+        if age_seconds < self._stale_running_seconds:
+            return
+        message = (
+            "Job marked as failed after stale running state "
+            f"({int(age_seconds)}s without updates)"
+        )
+        logger.warning("Marking stale job %s as failed: %s", job_id, message)
+        job.update(
+            {
+                "status": "failed",
+                "message": message,
+                "error": "Stale running job detected (worker likely crashed or was killed)",
+                "failed_at": now,
+                "completed_at": now,
+                "updated_at": now,
+            }
+        )
+        self._persist()
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve job data by ID."""
         with self._lock:
             self._maybe_reload()
+            self._mark_stale_running_job(job_id)
             job = self._jobs.get(job_id)
             return job.copy() if job else None
 
@@ -151,6 +192,8 @@ class JobStore:
         """List all jobs."""
         with self._lock:
             self._maybe_reload()
+            for job_id in list(self._jobs.keys()):
+                self._mark_stale_running_job(job_id)
             return [job.copy() for job in self._jobs.values()]
 
     def delete_job(self, job_id: str) -> bool:

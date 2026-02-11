@@ -27,6 +27,19 @@ class TaxonomyNode(BaseModel):
         default=False, description="Whether the node represents a terminal leaf"
     )
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "code": "2512",
+                "level": 4,
+                "label": "Software developers",
+                "definition": "Develop and maintain software systems.",
+                "examples": "Backend developer, frontend developer",
+                "parentCode": "251",
+                "isLeaf": True,
+            }
+        }
+
 
 class TaxonomyData(BaseModel):
     """Complete taxonomy structure."""
@@ -41,6 +54,40 @@ class TaxonomyData(BaseModel):
         ..., min_length=1, description="List of taxonomy nodes"
     )
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "key": "ISCO",
+                "maxDepth": 4,
+                "levelNames": {
+                    "1": "Major Group",
+                    "2": "Sub-major Group",
+                    "3": "Minor Group",
+                    "4": "Unit Group",
+                },
+                "nodes": [
+                    {
+                        "code": "2",
+                        "level": 1,
+                        "label": "Professionals",
+                        "definition": "",
+                        "examples": "",
+                        "parentCode": None,
+                        "isLeaf": False,
+                    },
+                    {
+                        "code": "25",
+                        "level": 2,
+                        "label": "Information and communications technology professionals",
+                        "definition": "",
+                        "examples": "",
+                        "parentCode": "2",
+                        "isLeaf": False,
+                    },
+                ],
+            }
+        }
+
 
 class TaxonomyRequest(BaseModel):
     """Request payload for taxonomy operations."""
@@ -48,7 +95,53 @@ class TaxonomyRequest(BaseModel):
     action: Literal["create"] = Field(
         ..., description="Action to perform (currently only 'create' is supported)"
     )
+    sourceSlug: Optional[str] = Field(
+        None,
+        min_length=1,
+        description=(
+            "Optional source identifier for the caller. "
+            "If omitted, inferred from request host (e.g., domani1.com -> domani1)."
+        ),
+    )
     taxonomy: TaxonomyData = Field(..., description="Taxonomy data to process")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "action": "create",
+                "sourceSlug": "domani1",
+                "taxonomy": {
+                    "key": "ISCO",
+                    "maxDepth": 4,
+                    "levelNames": {
+                        "1": "Major Group",
+                        "2": "Sub-major Group",
+                        "3": "Minor Group",
+                        "4": "Unit Group",
+                    },
+                    "nodes": [
+                        {
+                            "code": "2",
+                            "level": 1,
+                            "label": "Professionals",
+                            "definition": "",
+                            "examples": "",
+                            "parentCode": None,
+                            "isLeaf": False,
+                        },
+                        {
+                            "code": "25",
+                            "level": 2,
+                            "label": "Information and communications technology professionals",
+                            "definition": "",
+                            "examples": "",
+                            "parentCode": "2",
+                            "isLeaf": False,
+                        },
+                    ],
+                },
+            }
+        }
 
 
 class TaxonomyJobResponse(BaseModel):
@@ -60,6 +153,16 @@ class TaxonomyJobResponse(BaseModel):
     )
     message: str = Field(..., description="Human-readable status message")
     created_at: datetime = Field(..., description="When the job was created")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "job_id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "pending",
+                "message": "Taxonomy processing started",
+                "created_at": "2026-02-11T12:00:00Z",
+            }
+        }
 
 
 class TaxonomyStatusResponse(BaseModel):
@@ -78,3 +181,15 @@ class TaxonomyStatusResponse(BaseModel):
     completed_at: Optional[datetime] = Field(
         None, description="When the job completed or failed"
     )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "job_id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "completed",
+                "message": "Pipeline completed successfully",
+                "progress": 1.0,
+                "created_at": "2026-02-11T12:00:00Z",
+                "completed_at": "2026-02-11T12:01:10Z",
+            }
+        }

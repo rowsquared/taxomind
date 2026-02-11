@@ -8,7 +8,7 @@ without propagating changes to ancestors.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Callable, Dict, Iterable, Tuple
+from typing import Any, Callable, Dict, Iterable, Tuple, Optional
 
 import logging
 
@@ -185,6 +185,7 @@ def embed_learning_updates(
     local_files_only: bool = False,
     query_prefix: str | None = None,
     batch_size: int = 32,
+    max_chars: Optional[int] = 100,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Embed update texts and filter invalid node codes."""
 
@@ -226,6 +227,7 @@ def embed_learning_updates(
         embed_all=True,
         batch_size=batch_size,
         show_progress_bar=False,
+        max_chars=max_chars,
     )
     valid_updates["embedding"] = list(embeddings)
 

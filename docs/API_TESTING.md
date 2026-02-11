@@ -74,6 +74,15 @@ export API_URL="http://localhost:8000"   # dev server
 export TOKEN="your-token-here"
 ```
 
+## Request source slug (`sourceSlug`)
+
+For POST endpoints with request bodies (`/taxonomies`, `/classify`, `/label`, `/learn`),
+you can provide an optional top-level `sourceSlug` field.
+
+- If provided, it is used as-is (normalized to slug format).
+- If omitted, the API infers it from the request host.
+  Example: `domani1.com` -> `domani1`.
+
 ## 2) Health (no auth)
 
 ```bash
@@ -96,7 +105,9 @@ In `dramatiq` mode this also reports Redis connectivity:
 
 ### 3.1) `POST /taxonomies` (create taxonomy from JSON request)
 
-This triggers the `build_taxonomy_from_request` Kedro pipeline asynchronously.
+The API converts the JSON payload to a taxonomy CSV partition, then triggers the
+`build_taxonomy` Kedro pipeline asynchronously.
+If you want to set it explicitly, add top-level `"sourceSlug": "domani1"` to the JSON file.
 
 ISCO example:
 
@@ -125,7 +136,7 @@ curl "$API_URL/taxonomies/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
 
 Useful side-effects to verify on disk:
 
-- request persisted to `data/03_primary/taxonomies/requests/<TAXONOMY_KEY>.json`
+- normalized taxonomy CSV persisted to `data/03_primary/taxonomies/<TAXONOMY_KEY>.csv`
 - index persisted to `data/03_primary/taxonomies/index/<TAXONOMY_KEY>.parquet`
 
 ### 3.2) `POST /taxonomies/{taxonomy_key}/build` (build index from CSV definition)
@@ -173,6 +184,7 @@ curl -X POST "$API_URL/classify" \
   -H "Content-Type: application/json" \
   -d '{
     "taxonomyKey": "ISCO",
+    "sourceSlug": "domani1",
     "sentences": [
       {
         "sentence_id": "sent_001",
@@ -205,6 +217,7 @@ curl -X POST "$API_URL/label" \
   -H "Content-Type: application/json" \
   -d '{
     "taxonomyKey": "ISCO",
+    "sourceSlug": "domani1",
     "batchId": "batch_001",
     "sentences": [
       {
@@ -239,6 +252,7 @@ curl -X POST "$API_URL/learn" \
   -H "Content-Type: application/json" \
   -d '{
     "taxonomyKey": "ISCO",
+    "sourceSlug": "domani1",
     "sentences": [
       {
         "sentenceId": "learn_001",
@@ -260,6 +274,11 @@ It returns `jobId` (camelCase). Poll:
 JOB_ID="<paste jobId here>"
 curl "$API_URL/learn/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
 ```
+
+Useful side-effects to verify on disk:
+
+- request payload persisted to `data/08_temp_training/payloads/<JOB_ID>.json`
+- job config persisted to `data/08_temp_training/job_configs/<JOB_ID>.json`
 
 ## 7) Error analysis endpoints
 

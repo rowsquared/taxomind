@@ -16,5 +16,21 @@ The `base` folder is for shared configuration, such as non-sensitive and project
 
 WARNING: Please do not put access credentials in the base configuration folder.
 
+## Environment configuration
+
+This project uses environment-specific overrides on top of `conf/base`:
+
+- `conf/test`: testing-oriented overrides for `catalog*` and `parameters*`
+- `conf/prod`: production-oriented overrides for `catalog*` and `parameters*`
+
+Use them with Kedro's `--env` flag:
+
+```bash
+kedro run --env=test --pipeline=inference_batch
+kedro run --env=prod --pipeline=inference_batch
+```
+
+Keep shared defaults in `conf/base`, and override only environment-specific values in `conf/test` and `conf/prod`.
+
 ## Find out more
 You can find out more about configuration from the [user guide documentation](https://docs.kedro.org/en/stable/configuration/configuration_basics.html).
