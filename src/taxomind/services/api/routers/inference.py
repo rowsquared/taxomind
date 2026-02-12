@@ -113,6 +113,42 @@ async def create_inference_job(
     )
 
 
+@router.post(
+    "/classify/{job_id}/cancel",
+    response_model=InferenceStatusResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def cancel_inference_job(
+    job_id: str,
+    job_store: JobStore = Depends(get_job_store),
+) -> InferenceStatusResponse:
+    """Request cancellation for an inference job."""
+    job = job_store.cancel_job(job_id)
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Inference job '{job_id}' not found",
+        )
+
+    result = None
+    if job.get("status") == "completed" and job.get("result"):
+        result = InferenceResult(**job["result"])
+
+    return InferenceStatusResponse(
+        jobId=job["job_id"],
+        status=job["status"],
+        taxonomyKey=job.get("taxonomy_key", ""),
+        message=job.get("message", ""),
+        createdAt=job["created_at"],
+        startedAt=job.get("started_at"),
+        completedAt=job.get("completed_at"),
+        failedAt=job.get("failed_at"),
+        error=job.get("error"),
+        result=result,
+    )
+
+
 @router.get(
     "/classify/{job_id}/status",
     response_model=InferenceStatusResponse,

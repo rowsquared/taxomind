@@ -34,6 +34,10 @@ class LearningPipelineService(BasePipelineService):
     ) -> None:
         """Execute the learning pipeline (called from BackgroundTasks)."""
         try:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: skipping learning run (already canceled)", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 status="running",
@@ -58,6 +62,10 @@ class LearningPipelineService(BasePipelineService):
                 job_config["sourceSlug"] = source_slug
             self._persist_job_inputs(job_id, job_config, training_data)
 
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received before training run", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 message="Training models",
@@ -75,6 +83,10 @@ class LearningPipelineService(BasePipelineService):
             update_summary = result.get("learning_update_summary") if isinstance(result, dict) else result
             formatted = self._format_evidence_results(update_summary)
 
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received after training run", job_id)
+                return
+
             logger.info("Job %s: Pipeline completed successfully", job_id)
             self.job_store.update_job(
                 job_id,
@@ -85,6 +97,9 @@ class LearningPipelineService(BasePipelineService):
             )
 
         except Exception as e:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: learning canceled during execution", job_id)
+                return
             error_msg = str(e)
             logger.error("Job %s: Pipeline failed with error: %s", job_id, error_msg)
             self.job_store.update_job(

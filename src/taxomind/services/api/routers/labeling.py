@@ -104,6 +104,38 @@ async def create_labeling_job(
     )
 
 
+@router.post(
+    "/label/{job_id}/cancel",
+    response_model=LabelingStatusResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def cancel_labeling_job(
+    job_id: str,
+    job_store: JobStore = Depends(get_job_store),
+) -> LabelingStatusResponse:
+    """Request cancellation for a labeling job."""
+    job = job_store.cancel_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    result = None
+    if job.get("status") == "completed" and job.get("result"):
+        result = LabelingResponse(**job["result"])
+
+    return LabelingStatusResponse(
+        job_id=job["job_id"],
+        batch_id=job.get("batch_id", ""),
+        status=job["status"],
+        message=job.get("message"),
+        progress=job.get("progress"),
+        error=job.get("error"),
+        created_at=job["created_at"],
+        completed_at=job.get("completed_at"),
+        result=result,
+    )
+
+
 @router.get(
     "/label/{job_id}/status",
     response_model=LabelingStatusResponse,

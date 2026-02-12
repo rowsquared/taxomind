@@ -10,6 +10,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from taxomind.services.api.models.job_status import (
+    JobStatus,
+    is_terminal_job_status,
+    normalize_job_status,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -141,6 +147,20 @@ class JobStore:
             self._maybe_reload()
             if job_id not in self._jobs:
                 return None
+            current_status = self._jobs[job_id].get("status")
+            next_status = kwargs.get("status")
+            if is_terminal_job_status(current_status):
+                if next_status and (
+                    normalize_job_status(next_status)
+                    != normalize_job_status(current_status)
+                ):
+                    logger.info(
+                        "Ignoring status transition for terminal job %s: %s -> %s",
+                        job_id,
+                        current_status,
+                        next_status,
+                    )
+                    return self._jobs[job_id].copy()
             kwargs.setdefault("updated_at", datetime.now(UTC))
             self._jobs[job_id].update(kwargs)
             self._persist()
@@ -150,7 +170,7 @@ class JobStore:
         if self._stale_running_seconds <= 0:
             return
         job = self._jobs.get(job_id)
-        if not job or job.get("status") != "running":
+        if not job or normalize_job_status(job.get("status")) != JobStatus.running.value:
             return
         reference = (
             job.get("updated_at")
@@ -205,6 +225,37 @@ class JobStore:
                 self._persist()
                 return True
             return False
+
+    def cancel_job(
+        self,
+        job_id: str,
+        message: str = "Cancellation requested by client",
+    ) -> Optional[Dict[str, Any]]:
+        """Cancel a pending/running job.
+
+        If the job is already terminal (completed/failed/canceled), it is returned
+        unchanged.
+        """
+        with self._lock:
+            self._maybe_reload()
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if is_terminal_job_status(job.get("status")):
+                return job.copy()
+            now = datetime.now(UTC)
+            job.update(
+                {
+                    "status": "canceled",
+                    "message": message,
+                    "error": None,
+                    "canceled_at": now,
+                    "completed_at": now,
+                    "updated_at": now,
+                }
+            )
+            self._persist()
+            return job.copy()
 
 
 # Singleton instance

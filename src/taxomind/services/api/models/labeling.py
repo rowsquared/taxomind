@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+from .job_status import JobStatus
 
 
 class LabelingSentence(BaseModel):
@@ -156,7 +158,7 @@ class LabelingJobResponse(BaseModel):
 
     job_id: str = Field(..., description="Unique identifier for the job")
     batch_id: str = Field(..., description="Batch identifier from request")
-    status: Literal["pending", "running", "completed", "failed"] = Field(
+    status: JobStatus = Field(
         ..., description="Current status of the job"
     )
     message: str = Field(..., description="Human-readable status message")
@@ -179,7 +181,7 @@ class LabelingStatusResponse(BaseModel):
 
     job_id: str = Field(..., description="Unique identifier for the job")
     batch_id: str = Field(..., description="Batch identifier from request")
-    status: Literal["pending", "running", "completed", "failed"] = Field(
+    status: JobStatus = Field(
         ..., description="Current status of the job"
     )
     message: Optional[str] = Field(None, description="Status message")

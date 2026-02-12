@@ -7,6 +7,8 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .job_status import JobStatus
+
 
 class TaxonomyNode(BaseModel):
     """Individual node in the taxonomy hierarchy."""
@@ -148,7 +150,7 @@ class TaxonomyJobResponse(BaseModel):
     """Response returned when a taxonomy job is created."""
 
     job_id: str = Field(..., description="Unique identifier for the job")
-    status: Literal["pending", "running", "completed", "failed"] = Field(
+    status: JobStatus = Field(
         ..., description="Current status of the job"
     )
     message: str = Field(..., description="Human-readable status message")
@@ -169,7 +171,7 @@ class TaxonomyStatusResponse(BaseModel):
     """Response for job status queries."""
 
     job_id: str = Field(..., description="Unique identifier for the job")
-    status: Literal["pending", "running", "completed", "failed"] = Field(
+    status: JobStatus = Field(
         ..., description="Current status of the job"
     )
     message: Optional[str] = Field(None, description="Status message")

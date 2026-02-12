@@ -51,6 +51,22 @@ async def run_error_analysis(
     )
 
 
+@router.post(
+    "/error-analysis/{job_id}/cancel",
+    response_model=ErrorAnalysisStatusResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def cancel_error_analysis_job(
+    job_id: str,
+    job_store: JobStore = Depends(get_job_store),
+) -> ErrorAnalysisStatusResponse:
+    """Request cancellation for an error analysis job."""
+    job = job_store.cancel_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return ErrorAnalysisStatusResponse(**job)
+
+
 @router.get(
     "/error-analysis/{job_id}/status",
     response_model=ErrorAnalysisStatusResponse,

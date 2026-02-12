@@ -172,6 +172,24 @@ async def build_taxonomy_index(
     )
 
 
+@router.post(
+    "/taxonomies/{job_id}/cancel",
+    response_model=TaxonomyStatusResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def cancel_taxonomy_job(
+    job_id: str,
+    job_store: JobStore = Depends(get_job_store),
+) -> TaxonomyStatusResponse:
+    """Request cancellation for a taxonomy job."""
+    job = job_store.cancel_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    return TaxonomyStatusResponse(**job)
+
+
 @router.get(
     "/taxonomies/{job_id}/status",
     response_model=TaxonomyStatusResponse,

@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from .job_status import JobStatus
+
 
 class TrainingAnnotation(BaseModel):
     """Annotation for a single hierarchical level.
@@ -120,7 +122,7 @@ class LearningJobResponse(BaseModel):
     """
 
     jobId: str = Field(..., description="Unique job identifier")
-    status: str = Field(..., description="Job status")
+    status: JobStatus = Field(..., description="Job status")
     taxonomyKey: str = Field(..., description="Taxonomy identifier")
     message: str = Field(..., description="Status message")
     createdAt: datetime = Field(..., description="Job creation timestamp")
@@ -212,7 +214,7 @@ class LearningStatusResponse(BaseModel):
     """
 
     jobId: str = Field(..., description="Unique job identifier")
-    status: str = Field(..., description="Job status")
+    status: JobStatus = Field(..., description="Job status")
     taxonomyKey: str = Field(..., description="Taxonomy identifier")
     message: str = Field(..., description="Status message")
     createdAt: datetime = Field(..., description="Job creation timestamp")

@@ -29,6 +29,10 @@ class ErrorAnalysisPipelineService(BasePipelineService):
     def run_pipeline(self, job_id: str) -> None:
         """Execute the error analysis pipeline (called from BackgroundTasks)."""
         try:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: skipping error analysis run (already canceled)", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 status="running",
@@ -41,6 +45,10 @@ class ErrorAnalysisPipelineService(BasePipelineService):
                 progress=0.3,
                 message="Running error analysis nodes",
             )
+
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received before error analysis run", job_id)
+                return
 
             result = self._session.run()
 
@@ -56,6 +64,10 @@ class ErrorAnalysisPipelineService(BasePipelineService):
 
             summary = self._summarize(classifai, training, sentences)
 
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received after error analysis run", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 status="completed",
@@ -66,6 +78,9 @@ class ErrorAnalysisPipelineService(BasePipelineService):
             )
 
         except Exception as exc:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: error analysis canceled during execution", job_id)
+                return
             error_msg = str(exc)
             logger.error("Job %s: error analysis failed: %s", job_id, error_msg)
             self.job_store.update_job(

@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
+
+from .job_status import JobStatus
 
 
 class ErrorAnalysisJobResponse(BaseModel):
     """Response returned when an error-analysis job is created."""
 
     job_id: str = Field(..., description="Unique identifier for the job")
-    status: Literal["pending", "running", "completed", "failed"] = Field(
+    status: JobStatus = Field(
         ..., description="Current status of the job"
     )
     message: str = Field(..., description="Human-readable status message")
@@ -33,7 +35,7 @@ class ErrorAnalysisStatusResponse(BaseModel):
     """Response for error-analysis job status queries."""
 
     job_id: str = Field(..., description="Unique identifier for the job")
-    status: Literal["pending", "running", "completed", "failed"] = Field(
+    status: JobStatus = Field(
         ..., description="Current status of the job"
     )
     message: Optional[str] = Field(None, description="Status message")

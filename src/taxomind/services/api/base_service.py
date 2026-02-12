@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from taxomind.services.api.models.job_status import JobStatus, normalize_job_status
 from taxomind.storage.job_store import get_job_store
 
 if TYPE_CHECKING:
@@ -45,4 +46,11 @@ class BasePipelineService:
         """Override in subclasses to call the correct Dramatiq actor."""
         raise NotImplementedError(
             f"{type(self).__name__} must implement _send_dramatiq()"
+        )
+
+    def is_job_canceled(self, job_id: str) -> bool:
+        """Return ``True`` when a cancellation was requested for a job."""
+        job = self.job_store.get_job(job_id)
+        return bool(
+            job and normalize_job_status(job.get("status")) == JobStatus.canceled.value
         )

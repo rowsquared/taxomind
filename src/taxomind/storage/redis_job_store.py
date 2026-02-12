@@ -15,6 +15,12 @@ from typing import Any, Dict, List, Optional
 
 import redis
 
+from taxomind.services.api.models.job_status import (
+    JobStatus,
+    is_terminal_job_status,
+    normalize_job_status,
+)
+
 logger = logging.getLogger(__name__)
 
 JOB_KEY_PREFIX = "taxomind:job:"
@@ -101,6 +107,20 @@ class RedisJobStore:
         if raw is None:
             return None
         job = json.loads(raw)
+        current_status = job.get("status")
+        next_status = kwargs.get("status")
+        if is_terminal_job_status(current_status):
+            if next_status and (
+                normalize_job_status(next_status)
+                != normalize_job_status(current_status)
+            ):
+                logger.info(
+                    "Ignoring status transition for terminal job %s: %s -> %s",
+                    job_id,
+                    current_status,
+                    next_status,
+                )
+                return self._deserialize_job(json.dumps(job))
         kwargs.setdefault("updated_at", datetime.now(UTC))
         for k, v in kwargs.items():
             job[k] = self._serialize_value(v)
@@ -110,7 +130,7 @@ class RedisJobStore:
     def _mark_stale_running_job(self, job_id: str, job: Dict[str, Any]) -> Dict[str, Any]:
         if self._stale_running_seconds <= 0:
             return job
-        if job.get("status") != "running":
+        if normalize_job_status(job.get("status")) != JobStatus.running.value:
             return job
         reference = (
             job.get("updated_at")
@@ -163,6 +183,33 @@ class RedisJobStore:
     def delete_job(self, job_id: str) -> bool:
         """Delete a job entry."""
         return self._redis.delete(self._key(job_id)) > 0
+
+    def cancel_job(
+        self,
+        job_id: str,
+        message: str = "Cancellation requested by client",
+    ) -> Optional[Dict[str, Any]]:
+        """Cancel a pending/running job.
+
+        If the job is already terminal (completed/failed/canceled), it is returned
+        unchanged.
+        """
+        key = self._key(job_id)
+        raw = self._redis.get(key)
+        if raw is None:
+            return None
+        job = json.loads(raw)
+        if is_terminal_job_status(job.get("status")):
+            return self._deserialize_job(json.dumps(job))
+        now = datetime.now(UTC)
+        job["status"] = "canceled"
+        job["message"] = message
+        job["error"] = None
+        job["canceled_at"] = self._serialize_value(now)
+        job["completed_at"] = self._serialize_value(now)
+        job["updated_at"] = self._serialize_value(now)
+        self._redis.set(key, json.dumps(job), ex=self._ttl)
+        return self._deserialize_job(json.dumps(job))
 
     def ping(self) -> bool:
         """Check Redis connectivity."""

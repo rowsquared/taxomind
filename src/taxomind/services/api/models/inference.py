@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from .job_status import JobStatus
+
 
 class InferenceSentence(BaseModel):
     """A single sentence to classify."""
@@ -69,7 +71,7 @@ class InferenceJobResponse(BaseModel):
     """Response when creating an inference job."""
 
     jobId: str = Field(..., description="Unique job identifier")
-    status: str = Field(..., description="Job status: pending, running, completed, failed")
+    status: JobStatus = Field(..., description="Job status")
     taxonomyKey: str = Field(..., description="Taxonomy used for classification")
     message: str = Field(..., description="Human-readable status message")
     createdAt: datetime = Field(..., description="Job creation timestamp")
@@ -138,7 +140,7 @@ class InferenceStatusResponse(BaseModel):
     """Response for inference job status query."""
 
     jobId: str = Field(..., description="Job identifier")
-    status: str = Field(..., description="Job status: pending, running, completed, failed")
+    status: JobStatus = Field(..., description="Job status")
     taxonomyKey: str = Field(..., description="Taxonomy used")
     message: str = Field(..., description="Human-readable status message")
     createdAt: datetime = Field(..., description="Job creation timestamp")

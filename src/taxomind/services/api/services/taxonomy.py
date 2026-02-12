@@ -56,12 +56,20 @@ class TaxonomyPipelineService(BasePipelineService):
     ) -> None:
         """Execute a taxonomy pipeline (called from BackgroundTasks)."""
         try:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: skipping taxonomy run (already canceled)", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 status="running",
                 progress=0.1,
                 message=f"Starting pipeline '{self.pipeline_name}'",
             )
+
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received before input preparation", job_id)
+                return
 
             if taxonomy_data:
                 self._write_taxonomy_csv(
@@ -82,7 +90,15 @@ class TaxonomyPipelineService(BasePipelineService):
                 message="Running pipeline nodes",
             )
 
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received before pipeline run", job_id)
+                return
+
             self._session.run(parameters={"taxonomy_key": taxonomy_key})
+
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received after pipeline run", job_id)
+                return
 
             logger.info("Job %s: Pipeline completed successfully", job_id)
             self.job_store.update_job(
@@ -94,6 +110,9 @@ class TaxonomyPipelineService(BasePipelineService):
             )
 
         except Exception as e:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: taxonomy run canceled during execution", job_id)
+                return
             error_msg = str(e)
             logger.error("Job %s: Pipeline failed with error: %s", job_id, error_msg)
             self.job_store.update_job(

@@ -41,6 +41,10 @@ class LabelingPipelineService(BasePipelineService):
     ) -> None:
         """Execute the labeling pipeline (called from BackgroundTasks)."""
         try:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: skipping labeling run (already canceled)", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 status="running",
@@ -81,6 +85,10 @@ class LabelingPipelineService(BasePipelineService):
                 taxonomy_key,
             )
 
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received before inference run", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 progress=0.3,
@@ -109,6 +117,10 @@ class LabelingPipelineService(BasePipelineService):
                 preflight_errors=preflight_errors,
             )
 
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received after inference run", job_id)
+                return
+
             logger.info("Job %s: Pipeline completed successfully", job_id)
             self.job_store.update_job(
                 job_id,
@@ -120,6 +132,9 @@ class LabelingPipelineService(BasePipelineService):
             )
 
         except Exception as e:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: labeling canceled during execution", job_id)
+                return
             error_msg = str(e)
             logger.error("Job %s: Pipeline failed with error: %s", job_id, error_msg)
             self.job_store.update_job(

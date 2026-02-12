@@ -139,6 +139,46 @@ async def create_learning_job(
     )
 
 
+@router.post(
+    "/learn/{job_id}/cancel",
+    response_model=LearningStatusResponse,
+    dependencies=[Depends(verify_token)],
+)
+async def cancel_learning_job(
+    job_id: str,
+    job_store: JobStore = Depends(get_job_store),
+) -> LearningStatusResponse:
+    """Request cancellation for a learning job."""
+    job = job_store.cancel_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    result = None
+    if job.get("status") == "completed" and job.get("result"):
+        result = TrainingResult(**job["result"])
+
+    progress = None
+    if job.get("status") == "running" and job.get("progress"):
+        progress_data = job["progress"]
+        if isinstance(progress_data, dict):
+            progress = ProgressInfo(**progress_data)
+
+    return LearningStatusResponse(
+        jobId=job["job_id"],
+        status=job["status"],
+        taxonomyKey=job.get("taxonomy_key", ""),
+        message=job.get("message", ""),
+        createdAt=job["created_at"],
+        startedAt=job.get("started_at"),
+        completedAt=job.get("completed_at"),
+        failedAt=job.get("failed_at"),
+        progress=progress,
+        error=job.get("error"),
+        result=result,
+    )
+
+
 @router.get(
     "/learn/{job_id}/status",
     response_model=LearningStatusResponse,

@@ -38,6 +38,10 @@ class InferencePipelineService(BasePipelineService):
     ) -> None:
         """Execute the inference pipeline (called from BackgroundTasks)."""
         try:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: skipping inference run (already canceled)", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 status="running",
@@ -98,6 +102,10 @@ class InferencePipelineService(BasePipelineService):
                 len(query_texts),
             )
 
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received before classification run", job_id)
+                return
+
             self.job_store.update_job(
                 job_id,
                 message="Performing classification",
@@ -127,6 +135,10 @@ class InferencePipelineService(BasePipelineService):
                 ordered_sentence_ids=ordered_sentence_ids,
             )
 
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: cancellation received after classification run", job_id)
+                return
+
             logger.info(
                 "Job %s: Inference completed for %d sentences",
                 job_id,
@@ -141,6 +153,9 @@ class InferencePipelineService(BasePipelineService):
             )
 
         except Exception as e:
+            if self.is_job_canceled(job_id):
+                logger.info("Job %s: inference canceled during execution", job_id)
+                return
             error_msg = str(e)
             logger.error(
                 "Job %s: Inference pipeline failed with error: %s",
