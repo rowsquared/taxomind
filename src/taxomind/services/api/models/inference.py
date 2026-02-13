@@ -146,6 +146,9 @@ class InferenceStatusResponse(BaseModel):
     createdAt: datetime = Field(..., description="Job creation timestamp")
 
     # Optional fields depending on status
+    progress: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Progress percentage (0.0 to 1.0)"
+    )
     startedAt: Optional[datetime] = Field(None, description="When job started running")
     completedAt: Optional[datetime] = Field(None, description="When job completed")
     failedAt: Optional[datetime] = Field(None, description="When job failed")

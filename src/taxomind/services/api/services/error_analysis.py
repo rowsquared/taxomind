@@ -38,6 +38,7 @@ class ErrorAnalysisPipelineService(BasePipelineService):
                 status="running",
                 progress=0.1,
                 message="Starting error analysis pipeline",
+                started_at=datetime.now(UTC),
             )
 
             self.job_store.update_job(
@@ -88,7 +89,7 @@ class ErrorAnalysisPipelineService(BasePipelineService):
                 status="failed",
                 error=error_msg,
                 message="Error analysis pipeline execution failed",
-                completed_at=datetime.now(UTC),
+                failed_at=datetime.now(UTC),
             )
 
     def _summarize(

@@ -131,7 +131,9 @@ async def cancel_labeling_job(
         progress=job.get("progress"),
         error=job.get("error"),
         created_at=job["created_at"],
+        started_at=job.get("started_at"),
         completed_at=job.get("completed_at"),
+        failed_at=job.get("failed_at"),
         result=result,
     )
 
@@ -179,6 +181,8 @@ async def get_labeling_status(
         progress=job.get("progress"),
         error=job.get("error"),
         created_at=job["created_at"],
+        started_at=job.get("started_at"),
         completed_at=job.get("completed_at"),
+        failed_at=job.get("failed_at"),
         result=result,
     )

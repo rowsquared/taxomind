@@ -41,6 +41,7 @@ class LearningPipelineService(BasePipelineService):
             self.job_store.update_job(
                 job_id,
                 status="running",
+                progress=0.1,
                 message="Starting training pipeline",
                 started_at=datetime.now(UTC),
             )
@@ -68,6 +69,7 @@ class LearningPipelineService(BasePipelineService):
 
             self.job_store.update_job(
                 job_id,
+                progress=0.3,
                 message="Training models",
             )
 
@@ -77,6 +79,7 @@ class LearningPipelineService(BasePipelineService):
 
             self.job_store.update_job(
                 job_id,
+                progress=0.9,
                 message="Finalizing training results",
             )
 
@@ -91,6 +94,7 @@ class LearningPipelineService(BasePipelineService):
             self.job_store.update_job(
                 job_id,
                 status="completed",
+                progress=1.0,
                 message="Training completed successfully",
                 completed_at=datetime.now(UTC),
                 result=formatted,

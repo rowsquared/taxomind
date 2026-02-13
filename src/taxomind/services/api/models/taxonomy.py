@@ -180,8 +180,14 @@ class TaxonomyStatusResponse(BaseModel):
     )
     error: Optional[str] = Field(None, description="Error message if job failed")
     created_at: datetime = Field(..., description="When the job was created")
+    started_at: Optional[datetime] = Field(
+        None, description="When the job started running"
+    )
     completed_at: Optional[datetime] = Field(
         None, description="When the job completed or failed"
+    )
+    failed_at: Optional[datetime] = Field(
+        None, description="When the job failed"
     )
 
     class Config:

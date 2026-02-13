@@ -45,6 +45,7 @@ class InferencePipelineService(BasePipelineService):
             self.job_store.update_job(
                 job_id,
                 status="running",
+                progress=0.1,
                 message="Starting inference pipeline",
                 started_at=datetime.now(UTC),
             )
@@ -89,6 +90,7 @@ class InferencePipelineService(BasePipelineService):
                 self.job_store.update_job(
                     job_id,
                     status="completed",
+                    progress=1.0,
                     message="Inference completed (no valid text to classify)",
                     completed_at=datetime.now(UTC),
                     result=empty_result.model_dump(),
@@ -108,6 +110,7 @@ class InferencePipelineService(BasePipelineService):
 
             self.job_store.update_job(
                 job_id,
+                progress=0.3,
                 message="Performing classification",
             )
 
@@ -120,6 +123,7 @@ class InferencePipelineService(BasePipelineService):
 
             self.job_store.update_job(
                 job_id,
+                progress=0.9,
                 message="Finalizing inference results",
             )
 
@@ -147,6 +151,7 @@ class InferencePipelineService(BasePipelineService):
             self.job_store.update_job(
                 job_id,
                 status="completed",
+                progress=1.0,
                 message="Inference completed successfully",
                 completed_at=datetime.now(UTC),
                 result=inference_result.model_dump(),

@@ -50,6 +50,7 @@ class LabelingPipelineService(BasePipelineService):
                 status="running",
                 progress=0.1,
                 message="Starting labeling pipeline",
+                started_at=datetime.now(UTC),
             )
 
             taxonomy_key = labeling_data.get("taxonomyKey")
@@ -142,7 +143,7 @@ class LabelingPipelineService(BasePipelineService):
                 status="failed",
                 error=error_msg,
                 message="Pipeline execution failed",
-                completed_at=datetime.now(UTC),
+                failed_at=datetime.now(UTC),
             )
 
     def _format_results(

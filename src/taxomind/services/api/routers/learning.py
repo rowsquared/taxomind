@@ -12,7 +12,6 @@ from taxomind.services.api.models.learning import (
     LearningJobResponse,
     LearningRequest,
     LearningStatusResponse,
-    ProgressInfo,
     TrainingResult,
 )
 from taxomind.services.api.request_source import (
@@ -158,12 +157,6 @@ async def cancel_learning_job(
     if job.get("status") == "completed" and job.get("result"):
         result = TrainingResult(**job["result"])
 
-    progress = None
-    if job.get("status") == "running" and job.get("progress"):
-        progress_data = job["progress"]
-        if isinstance(progress_data, dict):
-            progress = ProgressInfo(**progress_data)
-
     return LearningStatusResponse(
         jobId=job["job_id"],
         status=job["status"],
@@ -173,7 +166,7 @@ async def cancel_learning_job(
         startedAt=job.get("started_at"),
         completedAt=job.get("completed_at"),
         failedAt=job.get("failed_at"),
-        progress=progress,
+        progress=job.get("progress"),
         error=job.get("error"),
         result=result,
     )
@@ -249,13 +242,6 @@ async def get_learning_status(
     if job.get("status") == "completed" and job.get("result"):
         result = TrainingResult(**job["result"])
 
-    # Extract progress if running
-    progress = None
-    if job.get("status") == "running" and job.get("progress"):
-        progress_data = job["progress"]
-        if isinstance(progress_data, dict):
-            progress = ProgressInfo(**progress_data)
-
     return LearningStatusResponse(
         jobId=job["job_id"],
         status=job["status"],
@@ -265,7 +251,7 @@ async def get_learning_status(
         startedAt=job.get("started_at"),
         completedAt=job.get("completed_at"),
         failedAt=job.get("failed_at"),
-        progress=progress,
+        progress=job.get("progress"),
         error=job.get("error"),
         result=result,
     )

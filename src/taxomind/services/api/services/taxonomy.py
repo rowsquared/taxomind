@@ -65,6 +65,7 @@ class TaxonomyPipelineService(BasePipelineService):
                 status="running",
                 progress=0.1,
                 message=f"Starting pipeline '{self.pipeline_name}'",
+                started_at=datetime.now(UTC),
             )
 
             if self.is_job_canceled(job_id):
@@ -96,6 +97,12 @@ class TaxonomyPipelineService(BasePipelineService):
 
             self._session.run(parameters={"taxonomy_key": taxonomy_key})
 
+            self.job_store.update_job(
+                job_id,
+                progress=0.9,
+                message="Finalizing pipeline results",
+            )
+
             if self.is_job_canceled(job_id):
                 logger.info("Job %s: cancellation received after pipeline run", job_id)
                 return
@@ -120,7 +127,7 @@ class TaxonomyPipelineService(BasePipelineService):
                 status="failed",
                 error=error_msg,
                 message="Pipeline execution failed",
-                completed_at=datetime.now(UTC),
+                failed_at=datetime.now(UTC),
             )
 
     def _write_taxonomy_csv(

@@ -139,29 +139,6 @@ class LearningJobResponse(BaseModel):
         }
 
 
-class ProgressInfo(BaseModel):
-    """Training progress information for running jobs.
-
-    Attributes:
-        currentLevel: Current hierarchical level being trained
-        totalLevels: Total number of hierarchical levels to train
-        message: Progress message
-    """
-
-    currentLevel: int = Field(..., description="Current level being trained")
-    totalLevels: int = Field(..., description="Total levels to train")
-    message: str = Field(..., description="Progress message")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "currentLevel": 2,
-                "totalLevels": 4,
-                "message": "Training models",
-            }
-        }
-
-
 class TrainingResult(BaseModel):
     """Training result data for completed jobs.
 
@@ -208,7 +185,7 @@ class LearningStatusResponse(BaseModel):
         startedAt: Job start timestamp (if running/completed/failed)
         completedAt: Job completion timestamp (if completed)
         failedAt: Job failure timestamp (if failed)
-        progress: Training progress info (if running)
+        progress: Numeric progress from 0.0 to 1.0 (if available)
         error: Error message (if failed)
         result: Training results (if completed)
     """
@@ -227,8 +204,8 @@ class LearningStatusResponse(BaseModel):
     failedAt: Optional[datetime] = Field(
         None, description="Job failure timestamp"
     )
-    progress: Optional[ProgressInfo] = Field(
-        None, description="Training progress information"
+    progress: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Progress percentage (0.0 to 1.0)"
     )
     error: Optional[str] = Field(None, description="Error message if failed")
     result: Optional[TrainingResult] = Field(
