@@ -24,8 +24,8 @@ cp .env.example .env   # set API_TOKENS
 docker compose up --build -d
 ```
 
-- API: <http://localhost:3000/docs>
-- Health: <http://localhost:3000/health>
+- API: <http://localhost:3001/docs> (default `docker-compose.yml` mapping)
+- Health: <http://localhost:3001/health>
 - Tasks are enqueued via Dramatiq into Redis and processed by the worker container.
 - Jobs are stored in Redis with a 24h TTL.
 - Logs: `docker compose logs -f worker` to watch pipeline execution.
@@ -70,7 +70,7 @@ Shell helpers (adjust the port to match your setup):
 
 ```bash
 export API_URL="http://localhost:8000"   # dev server
-# export API_URL="http://localhost:3000" # Docker / Docker Compose
+# export API_URL="http://localhost:3001" # Docker / Docker Compose (default)
 export TOKEN="your-token-here"
 ```
 
@@ -89,6 +89,12 @@ you can provide an optional top-level `sourceSlug` field.
 curl "$API_URL/health"
 ```
 
+Optional root probe (returns `200` and useful links):
+
+```bash
+curl "$API_URL/"
+```
+
 In `background` mode this returns:
 
 ```json
@@ -101,6 +107,13 @@ In `dramatiq` mode this also reports Redis connectivity:
 {"status": "healthy", "service": "taxomind-api", "version": "...", "task_backend": "dramatiq", "redis": "connected"}
 ```
 
+Job statuses returned by polling endpoints:
+- `pending`
+- `running`
+- `completed`
+- `failed`
+- `canceled`
+
 ## 3) Taxonomy endpoints
 
 ### 3.1) `POST /taxonomies` (create taxonomy from JSON request)
@@ -109,22 +122,25 @@ The API converts the JSON payload to a taxonomy CSV partition, then triggers the
 `build_taxonomy` Kedro pipeline asynchronously.
 If you want to set it explicitly, add top-level `"sourceSlug": "domani1"` to the JSON file.
 
-ISCO example:
+Minimal example:
 
 ```bash
 curl -X POST "$API_URL/taxonomies" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d @data/01_raw/isco_taxonomy_request.json
-```
-
-ISIC example:
-
-```bash
-curl -X POST "$API_URL/taxonomies" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d @data/01_raw/isic_taxonomy_request.json
+  -d '{
+    "action": "create",
+    "sourceSlug": "domani1",
+    "taxonomy": {
+      "key": "ISCO",
+      "maxDepth": 2,
+      "levelNames": {"1": "L1", "2": "L2"},
+      "nodes": [
+        {"code": "2", "level": 1, "label": "Professionals", "isLeaf": false},
+        {"code": "25", "level": 2, "label": "ICT Professionals", "parentCode": "2", "isLeaf": true}
+      ]
+    }
+  }'
 ```
 
 Save the returned `job_id` and poll:
@@ -134,14 +150,24 @@ JOB_ID="<paste job_id here>"
 curl "$API_URL/taxonomies/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
 ```
 
+Cancel (while pending/running):
+
+```bash
+curl -X POST "$API_URL/taxonomies/$JOB_ID/cancel" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 Useful side-effects to verify on disk:
 
-- normalized taxonomy CSV persisted to `data/03_primary/taxonomies/<TAXONOMY_KEY>.csv`
-- index persisted to `data/03_primary/taxonomies/index/<TAXONOMY_KEY>.parquet`
+- normalized taxonomy CSV persisted to `data/03_primary/taxonomies/<SCOPED_TAXONOMY_KEY>.csv`
+- index persisted to `data/03_primary/taxonomies/index/<SCOPED_TAXONOMY_KEY>.parquet`
+
+Where `<SCOPED_TAXONOMY_KEY>` is `<sourceSlug>_<taxonomyKey>` (for example `domani1_ISCO`).
 
 ### 3.2) `POST /taxonomies/{taxonomy_key}/build` (build index from CSV definition)
 
 This triggers the `build_taxonomy` pipeline asynchronously.
+`taxonomy_key` is scoped internally using the request host (`localhost` -> `localhost_ISCO`).
 
 ```bash
 curl -X POST "$API_URL/taxonomies/ISCO/build" \
@@ -153,6 +179,13 @@ Poll:
 ```bash
 JOB_ID="<paste job_id here>"
 curl "$API_URL/taxonomies/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
+```
+
+Cancel (while pending/running):
+
+```bash
+curl -X POST "$API_URL/taxonomies/$JOB_ID/cancel" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 3.3) `POST /taxonomies/{taxonomy_key}/enrich` (LLM enrich taxonomy)
@@ -169,6 +202,13 @@ Poll:
 ```bash
 JOB_ID="<paste job_id here>"
 curl "$API_URL/taxonomies/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
+```
+
+Cancel (while pending/running):
+
+```bash
+curl -X POST "$API_URL/taxonomies/$JOB_ID/cancel" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ## 4) Classification endpoints
@@ -204,6 +244,13 @@ JOB_ID="<paste jobId here>"
 curl "$API_URL/classify/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
 ```
 
+Cancel (while pending/running):
+
+```bash
+curl -X POST "$API_URL/classify/$JOB_ID/cancel" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## 5) Labeling endpoints (hierarchical inference)
 
 ### 5.1) `POST /label`
@@ -236,6 +283,13 @@ It returns `job_id` (snake_case). Poll:
 ```bash
 JOB_ID="<paste job_id here>"
 curl "$API_URL/label/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
+```
+
+Cancel (while pending/running):
+
+```bash
+curl -X POST "$API_URL/label/$JOB_ID/cancel" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ## 6) Learning endpoints (incremental evidence updates)
@@ -275,6 +329,13 @@ JOB_ID="<paste jobId here>"
 curl "$API_URL/learn/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
 ```
 
+Cancel (while pending/running):
+
+```bash
+curl -X POST "$API_URL/learn/$JOB_ID/cancel" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 Useful side-effects to verify on disk:
 
 - request payload persisted to `data/08_temp_training/payloads/<JOB_ID>.json`
@@ -298,6 +359,13 @@ JOB_ID="<paste job_id here>"
 curl "$API_URL/error-analysis/$JOB_ID/status" -H "Authorization: Bearer $TOKEN"
 ```
 
+Cancel (while pending/running):
+
+```bash
+curl -X POST "$API_URL/error-analysis/$JOB_ID/cancel" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## 8) Verifying Docker Compose setup
 
 When running with `docker compose up`, you can check:
@@ -310,7 +378,7 @@ docker compose ps
 docker compose logs -f worker
 
 # Check Redis connectivity via health endpoint
-curl http://localhost:3000/health
+curl http://localhost:3001/health
 
 # Inspect Redis directly (optional)
 docker compose exec redis redis-cli KEYS "taxomind:job:*"

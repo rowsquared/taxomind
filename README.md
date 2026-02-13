@@ -61,6 +61,7 @@ Copy `.env.example` to `.env` and adjust:
 | `TASK_BACKEND`      | `background`                 | `background` (in-process) or `dramatiq` (Redis queue)          |
 | `REDIS_URL`         | _(none)_                     | Redis connection string, required when `TASK_BACKEND=dramatiq` |
 | `JOB_TTL_SECONDS`   | `86400`                      | How long completed jobs stay in Redis (24h default)            |
+| `JOB_STALE_RUNNING_SECONDS` | `1800`               | Auto-fail a running job if it has no updates for this duration |
 | `OPENAI_API_KEY`    | _(none)_                     | Required only for taxonomy enrichment (Optional)               |
 | `PORT`              | `3000`                       | API server port in production entrypoint / containers          |
 
@@ -90,13 +91,21 @@ services.
 `src/taxomind/services/api/fastapi_app.py` exposes an async job API (Bearer token
 auth) that maps to the Kedro pipelines:
 
+- `GET /` and `GET /health` (liveness and health endpoints)
 - `POST /taxonomies` and `GET /taxonomies/{job_id}/status` (create/build index from JSON request)
+- `POST /taxonomies/{job_id}/cancel` (cancel taxonomy job)
 - `POST /taxonomies/{taxonomy_key}/enrich` (run `enrich_taxonomy`)
 - `POST /taxonomies/{taxonomy_key}/build` (run `build_taxonomy`)
 - `POST /classify` and `GET /classify/{job_id}/status` (run `inference_batch` for classification)
+- `POST /classify/{job_id}/cancel` (cancel inference job)
 - `POST /label` and `GET /label/{job_id}/status` (run `inference_batch` for labeling)
+- `POST /label/{job_id}/cancel` (cancel labeling job)
 - `POST /learn` and `GET /learn/{job_id}/status` (run `learning_pipe`)
+- `POST /learn/{job_id}/cancel` (cancel learning job)
 - `POST /error-analysis` and `GET /error-analysis/{job_id}/status` (run `error_analysis`)
+- `POST /error-analysis/{job_id}/cancel` (cancel error-analysis job)
+
+Job status values are: `pending`, `running`, `completed`, `failed`, `canceled`.
 
 For POST request bodies on `/taxonomies`, `/classify`, `/label`, and `/learn`,
 an optional top-level `sourceSlug` is supported. If omitted, it is inferred from
@@ -179,7 +188,7 @@ This starts three containers:
 | Service  | Role                                              | Port                                  |
 | -------- | ------------------------------------------------- | ------------------------------------- |
 | `redis`  | Message broker + job store                        | internal only                         |
-| `api`    | FastAPI server (accepts requests, enqueues tasks) | 3000 (configurable via `API_PORT`)    |
+| `api`    | FastAPI server (accepts requests, enqueues tasks) | host `${API_PORT:-3001}` -> container `3000` |
 | `worker` | Dramatiq worker (executes Kedro pipelines)        | none                                  |
 
 Both `api` and `worker` share the `/app/data` volume so taxonomy files, models,
@@ -252,16 +261,18 @@ docker compose down -v       # stop and remove volumes (full reset)
 ### Production — Coolify
 
 1. Create a new **Docker Compose** service in Coolify from this repository.
-2. Coolify will detect `docker-compose.yml` and show three services: `redis`,
-   `api`, and `worker`.
-3. Set the following environment variables in Coolify (they are injected into
+2. Set the following environment variables in Coolify (they are injected into
    the `.env` file referenced by the compose file):
    - `API_TOKENS` — your production Bearer tokens (comma-separated)
    - `OPENAI_API_KEY` — if using taxonomy enrichment
+   - optional `API_PORT` — host port for API publish (`3001` default in compose)
+3. Keep only `api` publicly exposed; `worker` and `redis` should remain internal.
 4. Mount a persistent volume at `/app/data` for the `api` and `worker` services
    (the compose file uses a named volume `app_data` by default).
-5. Expose port `3000` for the `api` service (or set `API_PORT` to change it).
-6. The health check at `/health` reports:
+5. The compose file includes `SERVICE_URL_API_3000` on `api` for Coolify routing.
+6. If your project view shows only raw compose and you need per-service controls,
+   deploy via **Services -> Docker Compose Empty** instead.
+7. The health check at `/health` reports:
    - `status: healthy` — API and Redis are connected
    - `status: degraded` — API is up but Redis is unreachable
    - `task_backend: dramatiq` — confirms the queue backend is active
