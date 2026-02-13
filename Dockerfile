@@ -1,5 +1,5 @@
 # Taxomind API - Production Dockerfile for Coolify
-FROM python:3.13-slim
+FROM python:3.13-slim AS builder
 
 WORKDIR /app
 
@@ -7,7 +7,7 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies (minimal)
+# Install build dependencies for Python wheels
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     build-essential \
@@ -23,7 +23,26 @@ COPY requirements-prod.txt .
 
 # Install production dependencies only
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r requirements-prod.txt
+    pip install --no-cache-dir -r requirements-prod.txt
+
+
+FROM python:3.13-slim AS runtime
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH=/app/src
+
+# Runtime-only system dependency
+RUN apt-get update && apt-get install -y \
+    --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy prebuilt virtualenv from builder stage
+COPY --from=builder /opt/venv /opt/venv
 
 # Copy application files
 COPY src/ ./src/
@@ -40,9 +59,6 @@ RUN mkdir -p \
     /app/data/07_model_output \
     /app/data/08_temp_training \
     /app/data/09_job_store
-
-# Set Python path
-ENV PYTHONPATH=/app/src
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

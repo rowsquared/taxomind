@@ -1,6 +1,10 @@
 # Production requirements for Taxomind API
 # Only what's needed to run the API and pipelines
 
+# Prefer CPU-only PyTorch wheels to keep image size lower.
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
 # Core API framework
 fastapi==0.121.3
 uvicorn[standard]==0.38.0

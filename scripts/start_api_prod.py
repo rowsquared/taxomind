@@ -66,4 +66,5 @@ if __name__ == "__main__":
         reload=False,  # Production mode - no auto-reload
         log_level="info",
         workers=1,  # Can be increased based on your server capacity
+        access_log=False,
     )
