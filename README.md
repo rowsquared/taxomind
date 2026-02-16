@@ -106,6 +106,9 @@ auth) that maps to the Kedro pipelines:
 - `POST /error-analysis/{job_id}/cancel` (cancel error-analysis job)
 
 Job status values are: `pending`, `running`, `completed`, `failed`, `canceled`.
+Status payloads expose numeric `progress` (`0.0` to `1.0`) plus lifecycle
+timestamps (`created_*`, `started_*`, `completed_*`, `failed_*`) where relevant
+for each endpoint model.
 
 For POST request bodies on `/taxonomies`, `/classify`, `/label`, and `/learn`,
 an optional top-level `sourceSlug` is supported. If omitted, it is inferred from
@@ -194,6 +197,9 @@ This starts three containers:
 Both `api` and `worker` share the `/app/data` volume so taxonomy files, models,
 and training data are accessible from both processes.
 
+Note: Uvicorn access logs are disabled in the startup scripts (`access_log=False`)
+to reduce `/health` request noise; application and pipeline logs are still emitted.
+
 Stop everything:
 
 ```bash
@@ -210,6 +216,9 @@ docker compose down -v       # stop and remove volumes (full reset)
    ```bash
    docker build -t taxomind .
    ```
+
+   The image is optimized with a multi-stage build and CPU-only PyTorch wheels
+   (configured in `requirements-prod.txt`) to reduce size.
 
 2. **Run three services** (or use an orchestrator like Docker Compose, Kubernetes, etc.):
 

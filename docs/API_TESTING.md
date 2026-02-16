@@ -114,6 +114,11 @@ Job statuses returned by polling endpoints:
 - `failed`
 - `canceled`
 
+Common polling fields:
+- `progress`: numeric value from `0.0` to `1.0`
+- lifecycle timestamps: `created_*` always, plus `started_*`, `completed_*`,
+  and/or `failed_*` depending on endpoint and final state
+
 ## 3) Taxonomy endpoints
 
 ### 3.1) `POST /taxonomies` (create taxonomy from JSON request)
@@ -371,7 +376,7 @@ curl -X POST "$API_URL/error-analysis/$JOB_ID/cancel" \
 When running with `docker compose up`, you can check:
 
 ```bash
-# All three services should be healthy
+# API and Redis should be healthy; worker should be up/running
 docker compose ps
 
 # Follow worker logs to see pipeline execution
