@@ -36,7 +36,10 @@ def _host_to_slug(host: str) -> str:
         ipaddress.ip_address(candidate)
     except ValueError:
         parts = [part for part in candidate.split(".") if part]
-        if len(parts) >= 2:
+        if len(parts) >= 3:
+            # Keep subdomains + registrable label, drop only the last TLD label.
+            candidate = ".".join(parts[:-1])
+        elif len(parts) == 2:
             candidate = parts[-2]
         elif parts:
             candidate = parts[0]
