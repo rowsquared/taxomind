@@ -80,7 +80,10 @@ For POST endpoints with request bodies (`/taxonomies`, `/classify`, `/label`, `/
 you can provide an optional top-level `sourceSlug` field.
 
 - If provided, it is used as-is (normalized to slug format).
-- If omitted, the API infers it from the request host.
+- If omitted, the API infers it in this order:
+  1. `Origin` header hostname
+  2. `Referer` header hostname
+  3. request host fallback (`Host`/forwarded host)
   Host inference rule:
   1. strip leading `www`
   2. strip final TLD label

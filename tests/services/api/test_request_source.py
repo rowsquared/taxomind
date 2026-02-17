@@ -38,3 +38,25 @@ def test_resolve_source_slug_infers_from_host_when_missing() -> None:
         url=SimpleNamespace(hostname="subdomain.domani1.com"),
     )
     assert resolve_source_slug(request, None) == "subdomain-domani1"
+
+
+def test_resolve_source_slug_prefers_origin_over_api_host() -> None:
+    request = SimpleNamespace(
+        headers={
+            "origin": "https://classiflow.app.rowsquared.org",
+            "host": "taxo-api.app.rowsquared.org",
+        },
+        url=SimpleNamespace(hostname="taxo-api.app.rowsquared.org"),
+    )
+    assert resolve_source_slug(request, None) == "classiflow-app-rowsquared"
+
+
+def test_resolve_source_slug_uses_referer_when_origin_missing() -> None:
+    request = SimpleNamespace(
+        headers={
+            "referer": "https://classiflow.app.rowsquared.org/page/abc?x=1",
+            "host": "taxo-api.app.rowsquared.org",
+        },
+        url=SimpleNamespace(hostname="taxo-api.app.rowsquared.org"),
+    )
+    assert resolve_source_slug(request, None) == "classiflow-app-rowsquared"

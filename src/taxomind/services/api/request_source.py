@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import Request
 
@@ -50,12 +51,41 @@ def _host_to_slug(host: str) -> str:
     return slug or "unknown"
 
 
+def _hostname_from_header_url(value: Optional[str]) -> str:
+    """Extract hostname from Origin/Referer style header values."""
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "null":
+        return ""
+    parsed = urlparse(raw)
+    return str(parsed.hostname or "").strip()
+
+
 def resolve_source_slug(request: Request, provided_slug: Optional[str]) -> str:
-    """Return explicit source slug when provided, otherwise infer it from host."""
+    """
+    Return explicit source slug when provided, otherwise infer it from request metadata.
+
+    Priority:
+    1. provided_slug from request body
+    2. Origin header hostname
+    3. Referer header hostname
+    4. Host-style headers / request URL hostname
+    """
     if provided_slug:
         explicit = _slugify(provided_slug)
         if explicit:
             return explicit
+
+    origin_host = _hostname_from_header_url(request.headers.get("origin"))
+    if origin_host:
+        origin_slug = _host_to_slug(origin_host)
+        if origin_slug != "unknown":
+            return origin_slug
+
+    referer_host = _hostname_from_header_url(request.headers.get("referer"))
+    if referer_host:
+        referer_slug = _host_to_slug(referer_host)
+        if referer_slug != "unknown":
+            return referer_slug
 
     host = (
         request.headers.get("x-forwarded-host")

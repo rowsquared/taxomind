@@ -41,8 +41,8 @@ class LabelingRequest(BaseModel):
         min_length=1,
         description=(
             "Optional source identifier for the caller. "
-            "If omitted, inferred from request host "
-            "(e.g., subdomain.domani1.com -> subdomain.domani1)."
+            "If omitted, inferred from Origin/Referer host "
+            "(fallback: request host; e.g., subdomain.domani1.com -> subdomain-domani1)."
         ),
     )
     batchId: str = Field(..., description="Unique identifier for this batch")
@@ -54,7 +54,7 @@ class LabelingRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "taxonomyKey": "ISCO",
-                "sourceSlug": "subdomain.domani1",
+                "sourceSlug": "subdomain-domani1",
                 "batchId": "batch-20260211-001",
                 "sentences": [
                     {

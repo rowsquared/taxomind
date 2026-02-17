@@ -37,8 +37,8 @@ class InferenceRequest(BaseModel):
         min_length=1,
         description=(
             "Optional source identifier for the caller. "
-            "If omitted, inferred from request host "
-            "(e.g., subdomain.domani1.com -> subdomain.domani1)."
+            "If omitted, inferred from Origin/Referer host "
+            "(fallback: request host; e.g., subdomain.domani1.com -> subdomain-domani1)."
         ),
     )
     sentences: List[InferenceSentence] = Field(..., min_length=1, description="List of sentences to classify")
@@ -47,7 +47,7 @@ class InferenceRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "taxonomyKey": "ISCO",
-                "sourceSlug": "subdomain.domani1",
+                "sourceSlug": "subdomain-domani1",
                 "sentences": [
                     {
                         "sentence_id": "670ff0e7-d10e-430c-90e5-729a7e362ecc",

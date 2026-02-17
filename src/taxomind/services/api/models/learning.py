@@ -79,8 +79,8 @@ class LearningRequest(BaseModel):
         min_length=1,
         description=(
             "Optional source identifier for the caller. "
-            "If omitted, inferred from request host "
-            "(e.g., subdomain.domani1.com -> subdomain.domani1)."
+            "If omitted, inferred from Origin/Referer host "
+            "(fallback: request host; e.g., subdomain.domani1.com -> subdomain-domani1)."
         ),
     )
     sentences: List[TrainingSentence] = Field(
@@ -91,7 +91,7 @@ class LearningRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "taxonomyKey": "ISCO",
-                "sourceSlug": "subdomain.domani1",
+                "sourceSlug": "subdomain-domani1",
                 "sentences": [
                     {
                         "sentenceId": "job-001",
