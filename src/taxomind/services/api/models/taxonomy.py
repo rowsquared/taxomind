@@ -102,7 +102,8 @@ class TaxonomyRequest(BaseModel):
         min_length=1,
         description=(
             "Optional source identifier for the caller. "
-            "If omitted, inferred from request host (e.g., domani1.com -> domani1)."
+            "If omitted, inferred from request host "
+            "(e.g., subdomain.domani1.com -> subdomain.domani1)."
         ),
     )
     taxonomy: TaxonomyData = Field(..., description="Taxonomy data to process")
@@ -111,7 +112,7 @@ class TaxonomyRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "action": "create",
-                "sourceSlug": "domani1",
+                "sourceSlug": "subdomain.domani1",
                 "taxonomy": {
                     "key": "ISCO",
                     "maxDepth": 4,

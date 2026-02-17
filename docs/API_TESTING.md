@@ -81,7 +81,14 @@ you can provide an optional top-level `sourceSlug` field.
 
 - If provided, it is used as-is (normalized to slug format).
 - If omitted, the API infers it from the request host.
-  Example: `domani1.com` -> `domani1`.
+  Host inference rule:
+  1. strip leading `www`
+  2. strip final TLD label
+  3. join remaining labels with `-`
+  Examples:
+  - `subdomain.domani1.com` -> `subdomain-domani1`
+  - `www.test.post.com` -> `test-post`
+  - `www.test.app.request.com` -> `test-app-request`
 
 ## 2) Health (no auth)
 
@@ -125,7 +132,7 @@ Common polling fields:
 
 The API converts the JSON payload to a taxonomy CSV partition, then triggers the
 `build_taxonomy` Kedro pipeline asynchronously.
-If you want to set it explicitly, add top-level `"sourceSlug": "domani1"` to the JSON file.
+If you want to set it explicitly, add top-level `"sourceSlug": "test-app-request"` to the JSON file.
 
 Minimal example:
 
@@ -135,7 +142,7 @@ curl -X POST "$API_URL/taxonomies" \
   -H "Content-Type: application/json" \
   -d '{
     "action": "create",
-    "sourceSlug": "domani1",
+    "sourceSlug": "test-app-request",
     "taxonomy": {
       "key": "ISCO",
       "maxDepth": 2,
@@ -167,7 +174,7 @@ Useful side-effects to verify on disk:
 - normalized taxonomy CSV persisted to `data/03_primary/taxonomies/<SCOPED_TAXONOMY_KEY>.csv`
 - index persisted to `data/03_primary/taxonomies/index/<SCOPED_TAXONOMY_KEY>.parquet`
 
-Where `<SCOPED_TAXONOMY_KEY>` is `<sourceSlug>_<taxonomyKey>` (for example `domani1_ISCO`).
+Where `<SCOPED_TAXONOMY_KEY>` is `<sourceSlug>_<taxonomyKey>` (for example `test-app-request_ISCO`).
 
 ### 3.2) `POST /taxonomies/{taxonomy_key}/build` (build index from CSV definition)
 
@@ -229,7 +236,7 @@ curl -X POST "$API_URL/classify" \
   -H "Content-Type: application/json" \
   -d '{
     "taxonomyKey": "ISCO",
-    "sourceSlug": "domani1",
+    "sourceSlug": "test-app-request",
     "sentences": [
       {
         "sentence_id": "sent_001",
@@ -269,7 +276,7 @@ curl -X POST "$API_URL/label" \
   -H "Content-Type: application/json" \
   -d '{
     "taxonomyKey": "ISCO",
-    "sourceSlug": "domani1",
+    "sourceSlug": "test-app-request",
     "batchId": "batch_001",
     "sentences": [
       {
@@ -311,7 +318,7 @@ curl -X POST "$API_URL/learn" \
   -H "Content-Type: application/json" \
   -d '{
     "taxonomyKey": "ISCO",
-    "sourceSlug": "domani1",
+    "sourceSlug": "test-app-request",
     "sentences": [
       {
         "sentenceId": "learn_001",
